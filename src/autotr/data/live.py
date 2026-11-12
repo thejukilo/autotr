@@ -2,7 +2,9 @@
 
 Subscribes, per watched symbol, to `<sym>@kline_1m` (closed candles drive the strategy) and
 `<sym>@bookTicker` (best bid/ask drive simulated fills, stops and targets), plus
-`!markPrice@arr` for funding settlements. The watch list = top-N USDT perpetuals by 24h volume,
+`!markPrice@arr` for funding settlements. Binance serves these on separate endpoints, so there are
+two connections: `{ws_url}{ws_market_path}` (klines + mark prices) and `{ws_url}{ws_public_path}`
+(bookTicker). The legacy root URL no longer delivers klines. The watch list = top-N USDT perpetuals by 24h volume,
 refreshed every `candidate_refresh_hours`, always including symbols with open positions.
 
 Robustness: exponential-backoff reconnects, REST backfill of candles missed while disconnected,
@@ -114,11 +116,30 @@ class BinanceFeed:
                     self.last_open[sym] = b.open_time
                     yield KlineClosed(b, backfill=True)
 
-    def _url(self) -> str:
-        streams = [f"{s.lower()}@kline_1m" for s in self._symbols]
-        streams += [f"{s.lower()}@bookTicker" for s in self._symbols]
-        streams.append("!markPrice@arr")
-        return f"{self.cfg.live.ws_url.rstrip('/')}/stream?streams=" + "/".join(streams)
+    def _urls(self) -> dict[str, str]:
+        """Combined-stream URL per endpoint: klines + mark prices on `market`, quotes on `public`."""
+        lc = self.cfg.live
+        base = lc.ws_url.rstrip("/")
+        market = [f"{s.lower()}@kline_1m" for s in self._symbols] + ["!markPrice@arr"]
+        public = [f"{s.lower()}@bookTicker" for s in self._symbols]
+        return {
+            "market": f"{base}{lc.ws_market_path}/stream?streams=" + "/".join(market),
+            "public": f"{base}{lc.ws_public_path}/stream?streams=" + "/".join(public),
+        }
+
+    @staticmethod
+    async def _reader(name: str, url: str, queue: asyncio.Queue) -> None:
+        """Pump one WebSocket into the shared queue; any failure is forwarded so the loop reconnects."""
+        try:
+            async with websockets.connect(url, ping_interval=20, ping_timeout=20,
+                                          max_size=2**23, open_timeout=15) as ws:
+                async for raw in ws:
+                    await queue.put(raw)
+            raise ConnectionError(f"{name} stream closed")
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            await queue.put(ConnectionError(f"{name} stream: {exc}"))
 
     # ------------------------------------------------------------ parsing
     def _parse(self, msg: dict) -> list[Event]:
@@ -171,26 +192,30 @@ class BinanceFeed:
                     yield ev
                 async for ev in self._backfill():
                     yield ev
-                url = self._url()
-                log.info("connecting to %s (%d symbols)", self.cfg.live.ws_url, len(self._symbols))
+                urls = self._urls()
+                log.info("connecting to %s (%s + %s, %d symbols)", self.cfg.live.ws_url,
+                         self.cfg.live.ws_market_path, self.cfg.live.ws_public_path, len(self._symbols))
                 session_end = time.monotonic() + refresh_s
                 next_vol = time.monotonic() + vol_every_s
-                async with websockets.connect(url, ping_interval=20, ping_timeout=20,
-                                              max_size=2**23, open_timeout=15) as ws:
-                    backoff = 1.0
+                queue: asyncio.Queue = asyncio.Queue(maxsize=10_000)
+                readers = [asyncio.create_task(self._reader(n, u, queue)) for n, u in urls.items()]
+                try:
                     last_kline = time.monotonic()
                     while time.monotonic() < session_end:
                         try:
-                            raw = await asyncio.wait_for(ws.recv(), timeout=stale_s)
+                            raw = await asyncio.wait_for(queue.get(), timeout=stale_s)
                         except asyncio.TimeoutError:
                             raw = None
+                        if isinstance(raw, Exception):
+                            raise raw
                         for ev in (self._parse(json.loads(raw)) if raw else []):
                             if isinstance(ev, KlineClosed):
                                 last_kline = time.monotonic()
+                                backoff = 1.0
                             yield ev
                         if time.monotonic() - last_kline > stale_s:
                             log.warning("no candles received for %.0fs — reconnecting. If this repeats, "
-                                        "check live.ws_url in the config.", stale_s)
+                                        "check live.ws_url / live.ws_market_path in the config.", stale_s)
                             break
                         if time.monotonic() >= next_vol:
                             next_vol = time.monotonic() + vol_every_s
@@ -198,6 +223,10 @@ class BinanceFeed:
                                 yield Volumes24h(*await self.rest.ticker_24h())
                             except Exception as exc:  # noqa: BLE001
                                 log.warning("24h ticker refresh failed: %s", exc)
+                finally:
+                    for t in readers:
+                        t.cancel()
+                    await asyncio.gather(*readers, return_exceptions=True)
                 log.info("refreshing watch list / reconnecting")
             except asyncio.CancelledError:
                 raise

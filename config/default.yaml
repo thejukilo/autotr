@@ -112,5 +112,7 @@ live:
   candidate_refresh_hours: 6       # re-pick the top-volume watch list (also renews the WS connection)
   warmup_bars: 1500                # 1m history fetched per symbol at start-up (~25h)
   rest_url: https://fapi.binance.com
-  ws_url: wss://fstream.binance.com   # combined streams at {ws_url}/stream?streams=...
+  ws_url: wss://fstream.binance.com   # base URL; streams at {ws_url}{path}/stream?streams=...
+  ws_market_path: /market          # klines + mark prices (the root URL no longer sends klines)
+  ws_public_path: /public          # bookTicker (best bid/ask)
   stream_timeout_s: 150            # reconnect if no candle arrives for this long

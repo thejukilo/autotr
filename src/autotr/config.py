@@ -115,6 +115,8 @@ class LiveCfg(BaseModel):
     warmup_bars: int = 1500
     rest_url: str = "https://fapi.binance.com"
     ws_url: str = "wss://fstream.binance.com"
+    ws_market_path: str = "/market"
+    ws_public_path: str = "/public"
     stream_timeout_s: float = 150
 
 

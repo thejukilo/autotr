@@ -77,15 +77,26 @@ def test_feed_end_to_end_with_fake_server():
 async def _e2e():
     t0 = _now_min()
 
+    paths = []
+
     async def server(ws):
-        assert "aaausdt@kline_1m" in ws.request.path and "!markPrice@arr" in ws.request.path
-        msgs = [
-            {"stream": "aaausdt@bookTicker", "data": {"e": "bookTicker", "s": SYM, "b": "100.0", "a": "100.1", "T": t0 + 1}},
-            {"stream": "aaausdt@kline_1m", "data": {"e": "kline", "s": SYM, "k": {
-                "t": t0, "T": t0 + MINUTE_MS - 1, "s": SYM, "o": "100", "c": "100.2", "h": "100.4", "l": "99.9",
-                "v": "5", "q": "500", "x": True}}},
-            {"stream": "!markPrice@arr", "data": [{"s": SYM, "p": "100", "r": "0.0001", "T": t0 + 10}]},
-        ]
+        # Like Binance: klines + mark prices only on /market, quotes only on /public.
+        path = ws.request.path
+        paths.append(path)
+        if path.startswith("/market/stream?"):
+            assert "aaausdt@kline_1m" in path and "!markPrice@arr" in path and "bookTicker" not in path
+            await asyncio.sleep(0.2)  # let the quote arrive first
+            msgs = [
+                {"stream": "aaausdt@kline_1m", "data": {"e": "kline", "s": SYM, "k": {
+                    "t": t0, "T": t0 + MINUTE_MS - 1, "s": SYM, "o": "100", "c": "100.2", "h": "100.4", "l": "99.9",
+                    "v": "5", "q": "500", "x": True}}},
+                {"stream": "!markPrice@arr", "data": [{"s": SYM, "p": "100", "r": "0.0001", "T": t0 + 10}]},
+            ]
+        elif path.startswith("/public/stream?"):
+            assert "aaausdt@bookTicker" in path and "kline" not in path
+            msgs = [{"stream": "aaausdt@bookTicker", "data": {"e": "bookTicker", "s": SYM, "b": "100.0", "a": "100.1", "T": t0 + 1}}]
+        else:
+            raise AssertionError(f"unexpected path {path}")
         for m in msgs:
             await ws.send(json.dumps(m))
         await asyncio.sleep(5)
@@ -112,3 +123,4 @@ async def _e2e():
     assert any(isinstance(e, Quote) for e in got)
     assert isinstance(got[-1], KlineClosed) and got[-1].bar.close == 100.2
     assert feed._symbols == [SYM]  # non-TRADING symbol filtered out
+    assert sorted(p.split("/")[1] for p in paths) == ["market", "public"]
