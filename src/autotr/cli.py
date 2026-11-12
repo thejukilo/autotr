@@ -239,5 +239,116 @@ def status(db: Optional[Path] = typer.Option(None), config: Optional[Path] = Con
     _print_status(db or Path(cfg.live.db_path), cfg)
 
 
+@app.command()
+def optimize(
+    train_start: str = typer.Option(..., help="First training day YYYY-MM-DD"),
+    train_end: str = typer.Option(..., help="Last training day YYYY-MM-DD"),
+    test_start: str = typer.Option(..., help="First out-of-sample test day YYYY-MM-DD"),
+    test_end: str = typer.Option(..., help="Last out-of-sample test day YYYY-MM-DD"),
+    symbols: Optional[str] = typer.Option(None, help="Comma-separated symbols (default: config universe)"),
+    workers: Optional[int] = typer.Option(None, help="Parallel backtests (default: CPU count)"),
+    out: Path = typer.Option(Path("reports/optimize"), help="Output directory"),
+    config: Optional[Path] = ConfigOpt,
+) -> None:
+    """Grid-search settings on the training period; evaluate the best once on the test period."""
+    import csv
+    import time
+
+    import yaml
+
+    from autotr.engine.backtest import run_backtest
+    from autotr.optimize import DEFAULT_GRID, apply_params, describe, evaluate, run_grid, score
+    from autotr.data.replay import load_history
+    from autotr.report.metrics import compute_metrics
+    from autotr.report.visualize import plot_dashboard, plot_trade_gallery
+
+    _setup_logging(False)
+    logging.getLogger("autotr").setLevel(logging.WARNING)
+    cfg = load_config(config)
+    tr0, tr1, te0, te1 = map(_parse_date, (train_start, train_end, test_start, test_end))
+    if te0 <= tr1:
+        raise typer.BadParameter("the test period must start after the training period")
+    syms = _symbols(symbols, cfg.universe.symbols)
+    out.mkdir(parents=True, exist_ok=True)
+    train_days = (tr1 - tr0).days + 1
+    min_trades = max(int(train_days * 0.5), 10)
+
+    n_points = 1
+    for v in DEFAULT_GRID.values():
+        n_points *= len(v)
+    typer.echo(f"Training {tr0} .. {tr1} ({train_days} days, {len(syms)} coins): {n_points} settings")
+    t0 = time.time()
+
+    best_so_far: list = []
+
+    def progress(r, i, n):
+        m = r.metrics
+        if not best_so_far or score(r, min_trades) > score(best_so_far[0], min_trades):
+            best_so_far[:] = [r]
+        elapsed = time.time() - t0
+        eta = elapsed / i * (n - i)
+        b = best_so_far[0].metrics
+        typer.echo(f"  [{i:3d}/{n}  {elapsed / 60:4.1f}m, ~{eta / 60:4.1f}m left]  {m['return_pct']:+6.1f}%  "
+                   f"{m['trades']:4d} trades  PF {m['profit_factor']:4.2f}  | {describe(r.params)}"
+                   f"   (best so far {b['return_pct']:+.1f}%)")
+
+    results = run_grid(cfg, tr0, tr1, syms, workers=workers, on_result=progress)
+    results.sort(key=lambda r: score(r, min_trades), reverse=True)
+
+    with open(out / "grid_train.csv", "w", newline="") as fh:
+        w = csv.writer(fh)
+        w.writerow(["settings", "return_pct", "trades", "win_rate", "profit_factor", "max_drawdown_pct",
+                    "fees", "worst_month_pct"])
+        for r in results:
+            m = r.metrics
+            w.writerow([describe(r.params), round(m["return_pct"], 2), m["trades"], round(m["win_rate"], 3),
+                        round(m["profit_factor"], 3), round(m["max_drawdown_pct"], 2), round(m["fees"], 2),
+                        round(r.worst_month, 2)])
+
+    typer.echo(f"\nTop 10 on the training period (min {min_trades} trades):")
+    typer.echo(f"  {'return':>8} {'trades':>6} {'win':>5} {'PF':>5} {'maxDD':>6} {'worst mo':>8}  settings")
+    for r in results[:10]:
+        m = r.metrics
+        typer.echo(f"  {m['return_pct']:+7.1f}% {m['trades']:6d} {m['win_rate']:5.0%} {m['profit_factor']:5.2f} "
+                   f"{m['max_drawdown_pct']:5.1f}% {r.worst_month:+7.1f}%  {describe(r.params)}")
+
+    best = results[0]
+    baseline_params = {k: (getattr(cfg.strategy, "rsi_oversold"), getattr(cfg.strategy, "rsi_overbought"))
+                       if k.endswith("rsi_levels") else getattr(cfg.strategy, k.split(".")[1]) for k in DEFAULT_GRID}
+
+    typer.echo(f"\nOut-of-sample test {te0} .. {te1} (never seen by the optimizer):")
+    test_hist = load_history(cfg, te0, te1, syms)
+    train_hist = load_history(cfg, tr0, tr1, syms)
+    rows = []
+    for label, params in (("baseline", baseline_params), ("optimized", best.params)):
+        tr = evaluate(cfg, params, tr0, tr1, train_hist)
+        c = apply_params(cfg, params)
+        res = run_backtest(c, te0, te1, progress=False, history=test_hist)
+        ex = res.core.exchange
+        m = compute_metrics(ex.trades, res.equity, c.account.starting_balance, ex.balance, res.start_ts, res.end_ts)
+        rows.append((label, params, tr.metrics, m))
+        d = out / f"test_{label}"
+        d.mkdir(exist_ok=True)
+        title = f"{label.capitalize()} settings · out-of-sample {te0} → {te1} · {len(res.symbols)} coins"
+        plot_dashboard(ex.trades, res.equity, m, d / "dashboard.png", title)
+        plot_trade_gallery(c, ex.trades, d / "trades.png", title + " · best wins (top) and typical losses (bottom)")
+        (d / "summary.json").write_text(json.dumps(m, indent=2, default=str))
+
+    typer.echo(f"  {'':10} {'train return':>13} {'test return':>12} {'test trades':>12} {'test win':>9} "
+               f"{'test PF':>8} {'test maxDD':>11} {'test fees':>10}")
+    for label, params, trm, m in rows:
+        typer.echo(f"  {label:10} {trm['return_pct']:+12.1f}% {m['return_pct']:+11.1f}% {m['trades']:12d} "
+                   f"{m['win_rate']:9.0%} {m['profit_factor']:8.2f} {m['max_drawdown_pct']:10.1f}% {m['fees']:10.2f}")
+    typer.echo(f"\nOptimized settings: {describe(best.params)}")
+
+    best_cfg = apply_params(cfg, best.params)
+    keys = sorted({k.split(".")[1] for k in DEFAULT_GRID} - {"rsi_levels"} | {"rsi_oversold", "rsi_overbought"})
+    (out / "optimized.yaml").write_text(
+        f"# Best of {n_points} settings on {tr0}..{tr1}; out-of-sample {te0}..{te1}: "
+        f"{rows[1][3]['return_pct']:+.1f}%\n"
+        + yaml.safe_dump({"strategy": {k: getattr(best_cfg.strategy, k) for k in keys}}, sort_keys=True))
+    typer.echo(f"Saved {out}/optimized.yaml (use with --config), grid_train.csv, test_baseline/, test_optimized/")
+
+
 if __name__ == "__main__":
     app()

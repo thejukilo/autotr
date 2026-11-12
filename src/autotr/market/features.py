@@ -37,6 +37,9 @@ class SymbolState:
         self.rsi = RSI(cfg.rsi_period)
         self.atr1 = ATR(cfg.atr_period)
         self.atr5 = ATR(cfg.atr_period)
+        self.ema5: float | None = None
+        self._ema_hist: deque[float] = deque(maxlen=cfg.trend_slope_bars + 1)
+        self._ema_n = 0
         self.agg5 = BarAggregator(FIVE_MIN_MS)
         self.scan_atr = RollingATRPct(scan_cfg.atr_period_bars)
 
@@ -80,6 +83,10 @@ class SymbolState:
 
     def _on_bar5(self, b: Bar) -> None:
         self.atr5.update(b.high, b.low, b.close)
+        k = 2 / (self.cfg.trend_ema_period + 1)
+        self.ema5 = b.close if self.ema5 is None else self.ema5 + k * (b.close - self.ema5)
+        self._ema_n += 1
+        self._ema_hist.append(self.ema5)
         self.scan_atr.update(b.high, b.low, b.close)
         self.t5.append(b.open_time)
         self.h5.append(b.high)
@@ -98,6 +105,13 @@ class SymbolState:
             self.pivots.popleft()
 
     # ------------------------------------------------------------------ queries
+    @property
+    def ema_slope(self) -> float | None:
+        """Change of the 5m EMA over `trend_slope_bars` bars (None until the EMA has settled)."""
+        if self._ema_n < self.cfg.trend_ema_period or len(self._ema_hist) < self._ema_hist.maxlen:
+            return None
+        return self._ema_hist[-1] - self._ema_hist[0]
+
     @property
     def ready(self) -> bool:
         return (

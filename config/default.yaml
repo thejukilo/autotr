@@ -55,6 +55,11 @@ strategy:
   min_reward_risk_after_fees: 1.2
   time_stop_minutes: 30
   cooldown_minutes: 5
+  trend_filter: false              # true: no longs while the 5m EMA falls, no shorts while it rises
+  trend_ema_period: 50             # 5m bars (~4h)
+  trend_slope_bars: 6              # EMA slope measured over this many 5m bars (30 min)
+  min_stop_atr5: 0.0               # stop at least this × ATR(5m) from entry (room for 1m noise)
+  min_confluence: 1                # number of levels (zones/trendlines) that must agree
 
 risk:
   risk_per_trade: 0.02             # 2% of equity

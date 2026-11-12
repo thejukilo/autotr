@@ -110,3 +110,36 @@ def test_short_signal_rejected_when_target_zone_too_close():
                        atr5=0.5, last5_close=100.4, last5_open_time=0)
     cfg, st = _state_with(bars, ctx, rsi_prev=74, rsi_now=68)
     assert ScalperStrategy(cfg.strategy, cfg.exchange).on_bar(st) is None
+
+
+def _long_setup():
+    bars = [_b(0, 100.6, 100.7, 100.1, 100.2), _b(1, 100.2, 100.3, 99.95, 100.1), _b(2, 100.1, 100.5, 100.0, 100.4)]
+    ctx = LevelContext([Zone(99.8, 100.0, 3, 0), Zone(102.5, 102.8, 2, 0)], None, None,
+                       atr5=0.5, last5_close=100.3, last5_open_time=0)
+    return _state_with(bars, ctx, rsi_prev=27, rsi_now=33)
+
+
+def _set_ema(st, first, last):
+    st._ema_n = 1000
+    st._ema_hist.clear()
+    st._ema_hist.extend([first] * (st._ema_hist.maxlen - 1) + [last])
+
+
+def test_trend_filter_blocks_counter_trend_long():
+    cfg, st = _long_setup()
+    cfg.strategy.trend_filter = True
+    strat = ScalperStrategy(cfg.strategy, cfg.exchange)
+    assert strat.on_bar(st) is None            # EMA not settled yet -> no trade
+    _set_ema(st, 101.0, 100.5)                 # falling EMA
+    assert strat.on_bar(st) is None
+    _set_ema(st, 100.0, 100.2)                 # rising EMA
+    assert strat.on_bar(st) is not None
+
+
+def test_min_stop_atr5_widens_stop_and_confluence():
+    cfg, st = _long_setup()
+    cfg.strategy.min_stop_atr5 = 2.0           # 2 x ATR5 = 1.0 below entry
+    s = ScalperStrategy(cfg.strategy, cfg.exchange).on_bar(st)
+    assert s is not None and s.stop == pytest.approx(100.4 - 1.0)
+    cfg.strategy.min_confluence = 2            # only one level present
+    assert ScalperStrategy(cfg.strategy, cfg.exchange).on_bar(st) is None

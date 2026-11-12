@@ -62,6 +62,11 @@ class StrategyCfg(BaseModel):
     min_reward_risk_after_fees: float = 1.2
     time_stop_minutes: int = 30
     cooldown_minutes: int = 5
+    trend_filter: bool = False
+    trend_ema_period: int = 50
+    trend_slope_bars: int = 6
+    min_stop_atr5: float = 0.0
+    min_confluence: int = 1
 
 
 class RiskCfg(BaseModel):

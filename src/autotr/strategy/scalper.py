@@ -95,14 +95,18 @@ class ScalperStrategy:
         bar = st.last_bar
         price, now_ts, atr1 = bar.close, bar.close_time, float(st.atr1.value)
         side = Side.LONG if go_long else Side.SHORT
+        if c.trend_filter:
+            slope = st.ema_slope
+            if slope is None or (side is Side.LONG and slope < 0) or (side is Side.SHORT and slope > 0):
+                return None
 
         if side is Side.LONG:
             levels = self._support_levels(st, ctx, price, now_ts)
-            if not levels:
+            if len(levels) < max(c.min_confluence, 1):
                 return None
             level = max(levels, key=lambda lv: lv.price)  # closest support below price
             stop = level.price - c.stop_buffer_atr * atr1
-            stop = min(stop, price * (1 - c.min_stop_pct))
+            stop = min(stop, price * (1 - c.min_stop_pct), price - c.min_stop_atr5 * ctx.atr5)
             if price - stop > price * c.max_stop_pct:
                 return None
             risk = price - stop
@@ -112,11 +116,11 @@ class ScalperStrategy:
                 tp = min(tp, above[0].low)
         else:
             levels = self._resistance_levels(st, ctx, price, now_ts)
-            if not levels:
+            if len(levels) < max(c.min_confluence, 1):
                 return None
             level = min(levels, key=lambda lv: lv.price)  # closest resistance above price
             stop = level.price + c.stop_buffer_atr * atr1
-            stop = max(stop, price * (1 + c.min_stop_pct))
+            stop = max(stop, price * (1 + c.min_stop_pct), price + c.min_stop_atr5 * ctx.atr5)
             if stop - price > price * c.max_stop_pct:
                 return None
             risk = stop - price
