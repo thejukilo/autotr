@@ -1,0 +1,9 @@
+# Best of 72 settings on 2026-07-14..2026-10-10; out-of-sample 2026-10-12..2026-11-10: -32.6%
+# NOTE: did NOT generalise — lost money out-of-sample (PF 0.42). Kept as a reference, not a recommendation.
+strategy:
+  min_stop_atr5: 1.5
+  rsi_overbought: 75
+  rsi_oversold: 25
+  take_profit_r: 2.0
+  time_stop_minutes: 90
+  trend_filter: true
