@@ -8,8 +8,8 @@ build/
 dist/
 
 # Bot data / outputs
-data/
-reports/
+/data/
+/reports/
 *.db
 *.db-journal
 config/local.yaml

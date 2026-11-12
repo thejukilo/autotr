@@ -76,6 +76,9 @@ class LiveCfg(BaseModel):
     db_path: str = "data/live.db"
     candidate_refresh_hours: float = 6
     warmup_bars: int = 1500
+    rest_url: str = "https://fapi.binance.com"
+    ws_url: str = "wss://fstream.binance.com"
+    stream_timeout_s: float = 150
 
 
 class Config(BaseModel):

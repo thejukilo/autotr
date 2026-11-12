@@ -45,6 +45,8 @@ class LiveStore:
         self.db = sqlite3.connect(str(path))
         self.db.executescript(
             """
+            PRAGMA journal_mode = WAL;
+            PRAGMA synchronous = NORMAL;
             CREATE TABLE IF NOT EXISTS trades (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 symbol TEXT, side TEXT, qty REAL, entry_price REAL, exit_price REAL,

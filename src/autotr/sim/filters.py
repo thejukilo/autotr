@@ -64,6 +64,15 @@ class FilterBook:
     def has_real_data(self) -> bool:
         return bool(self._filters)
 
+    # Price-derived defaults are fixed the first time a symbol is seen; persist them so a restarted
+    # bot keeps rounding the same way (the real exchange's filters don't change mid-run either).
+    def defaults_state(self) -> dict[str, list[float]]:
+        return {s: [f.tick_size, f.step_size, f.min_qty, f.min_notional] for s, f in self._defaults.items()}
+
+    def load_defaults_state(self, state: dict[str, list[float]]) -> None:
+        for sym, vals in state.items():
+            self._defaults.setdefault(sym, SymbolFilters(*vals))
+
     # ------------------------------------------------------------ exchangeInfo
     @staticmethod
     def parse_exchange_info(info: dict) -> dict[str, SymbolFilters]:

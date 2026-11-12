@@ -12,7 +12,7 @@ from collections import Counter
 from dataclasses import dataclass, field
 
 from autotr.config import ExchangeCfg, RiskCfg, StrategyCfg
-from autotr.models import DAY_MS, MINUTE_MS, Side, Signal, Trade
+from autotr.models import DAY_MS, MINUTE_MS, Signal, Trade
 from autotr.sim.exchange import PaperExchange, PendingEntry, liquidation_price
 from autotr.sim.filters import FilterBook
 

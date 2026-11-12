@@ -64,6 +64,9 @@ risk:
   max_trades_per_day: 40
 
 live:
-  db_path: data/live.db
-  candidate_refresh_hours: 6
-  warmup_bars: 1500
+  db_path: data/live.db            # paper account + trade log (delete or use --reset to start over)
+  candidate_refresh_hours: 6       # re-pick the top-volume watch list (also renews the WS connection)
+  warmup_bars: 1500                # 1m history fetched per symbol at start-up (~25h)
+  rest_url: https://fapi.binance.com
+  ws_url: wss://fstream.binance.com   # combined streams at {ws_url}/stream?streams=...
+  stream_timeout_s: 150            # reconnect if no candle arrives for this long

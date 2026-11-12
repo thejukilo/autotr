@@ -12,7 +12,7 @@ at exit, funding as it occurs. Isolated margin is reserved per position; liquida
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass
 from typing import Callable
 
 from autotr.config import ExchangeCfg
