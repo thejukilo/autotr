@@ -1,5 +1,0 @@
-{
-  "ReagentSupplyDrainVolumeInCubicMeters": 0.000125,
-  "ControlMiniRackDrainVolumeInCubicMeters": 0.000150,
-  "DrainingInterval": "01:00:00"
-}

@@ -1,9 +1,0 @@
-{
-  "GetDiskFreeListPollingIntervalTime": "00:05:00",
-  "ApplicationDataMountPoint": "/opt",
-  "ApplicationDataWarningThresholdPercentage": "15.0",
-  "ApplicationDataCriticalThresholdPercentage": "2.0",
-  "UserDataMountPoint": "/opt/roche/var/lib/c5800",
-  "UserDataWarningThresholdPercentage": "10.0",
-  "UserDataCriticalThresholdPercentage": "2.0"
-}

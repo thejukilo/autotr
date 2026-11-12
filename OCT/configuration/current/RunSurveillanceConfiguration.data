@@ -1,8 +1,0 @@
-{
-    "UnsealedAdPlateHandoverTimeout": "00:02:00",
-    "SealedAdPlateHandoverTimeout": "00:04:00",
-    "SampleTransferDurationTimeout": "01:00:00",
-
-    "PTipMaximalVolumeForPutdownTipsSurveillanceActiveMicroliter": 550,
-    "ETipMaximalVolumeForPutdownTipsSurveillanceActiveMicroliter": 200
-}

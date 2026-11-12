@@ -1,3 +1,0 @@
-*************************RSA2L Version : [1.2.1.0] Logging started at 114101 *************************
-
-2026-10-01T11:41:01.530Z RSA2L_INTERFACE : [c5800_3429] -> ERROR Package inventory is empty

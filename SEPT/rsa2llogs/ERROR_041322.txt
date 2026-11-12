@@ -1,5 +1,0 @@
-*************************RSA2L Version : [1.2.1.0] Logging started at 041322 *************************
-
-2026-09-23T04:13:22.895Z RSA2L_INTERFACE : [c5800_3429] -> ERROR Returned from Gateway [56]
-2026-09-23T04:13:22.900Z RSA2L_INTERFACE : [c5800_3429] -> ERROR Failure in getting response from Gateway
-2026-09-23T04:13:22.900Z RSA2L_INTERFACE : [c5800_3429] -> ERROR Could not connect to Gateway

@@ -1,6 +1,0 @@
-{
-  "SampleTransferExecutionTimePerTwoWorkOrders": "00:01:00",
-  "ControlTransferExecutionTimePerTwoWorkOrders": "00:01:00",
-  "SuppliesTransferExecutionTime": "00:05:00",
-  "InterleavedSampleTransferOverhead": "00:10:00"
-}

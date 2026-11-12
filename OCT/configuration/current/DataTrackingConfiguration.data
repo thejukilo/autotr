@@ -1,5 +1,0 @@
-{
-    "DeletePressureDataCapturingFileAfterDownload": true,
-    "PublishNumberOfPhotometerImagesStartingWithTheFirst": 10,
-    "PublishNumberOfPhotometerImagesEndingWithTheLast": 10
-}

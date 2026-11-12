@@ -1,5 +1,0 @@
-{
-  "MinimumRemainingOpenTimeForFill": "5.00:00:00",
-  "ReservoirEmptyThresholdInCubicMeters": 0.000000,
-  "MaximumDwellTime": "5.00:00:00"
-}

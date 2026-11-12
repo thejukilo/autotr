@@ -1,8 +1,0 @@
-{
-  "MaxInstrumentReadyTime": "06:00:00",
-  "FluidSystemMaxRetentionTime": "10.00:00:00",
-  "FluidSystemMaintenanceGracePeriodAfterMaxRetentionTime": "01.00:00:00",
-  "FluidSystemServiceGracePeriodAfterMaintenanceLimit": "09.00:00:00",
-  "ShutdownTimeout": "00:00:45",
-  "ShutdownSystemDelayTime": "00:00:02"
-}
