@@ -10,7 +10,7 @@ from pathlib import Path
 
 from autotr.models import EquityPoint, Side, Trade
 
-TRADE_FIELDS = ["symbol", "side", "qty", "entry_price", "exit_price", "entry_time", "exit_time",
+TRADE_FIELDS = ["symbol", "side", "qty", "entry_price", "stop", "take_profit", "exit_price", "entry_time", "exit_time",
                 "gross_pnl", "fees", "funding", "net_pnl", "r_multiple", "risk_usd", "exit_reason",
                 "entry_reason"]
 
@@ -22,6 +22,7 @@ def iso(ts_ms: int) -> str:
 def trade_row(t: Trade) -> dict:
     return {
         "symbol": t.symbol, "side": t.side.value, "qty": t.qty, "entry_price": t.entry_price,
+        "stop": t.stop, "take_profit": t.take_profit,
         "exit_price": t.exit_price, "entry_time": iso(t.entry_ts), "exit_time": iso(t.exit_ts),
         "gross_pnl": round(t.gross_pnl, 6), "fees": round(t.fees, 6), "funding": round(t.funding, 6),
         "net_pnl": round(t.net_pnl, 6), "r_multiple": round(t.r_multiple, 3),

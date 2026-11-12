@@ -87,6 +87,10 @@ def backtest(
     write_trades_csv(ex.trades, out_dir / "trades.csv")
     plot_equity(res.equity, ex.trades, cfg.account.starting_balance, out_dir / "equity.png",
                 title=f"autotr backtest {start_d} .. {end_d}  ({len(res.symbols)} symbols)")
+    from autotr.report.visualize import plot_dashboard, plot_trade_gallery
+    label = f"Backtest {start_d} → {end_d}  ·  {len(res.symbols)} coins  ·  1m scalper"
+    plot_dashboard(ex.trades, res.equity, m, out_dir / "dashboard.png", label)
+    plot_trade_gallery(cfg, ex.trades, out_dir / "trades.png", f"{label}  ·  best wins (top) and typical losses (bottom)")
     extra = {
         "signals": len(res.core.signals),
         "risk_rejections": dict(res.core.risk.rejections),
@@ -104,7 +108,7 @@ def backtest(
     typer.echo(format_summary(m))
     typer.echo(f"Signals           {extra['signals']}  (risk rejections: {extra['risk_rejections']}, "
                f"cancelled at fill: {extra['entries_cancelled_at_fill']}, liquidations: {extra['liquidations']})")
-    typer.echo(f"Report            {out_dir}/  (summary.json, trades.csv, equity.png)  [{extra['elapsed_s']}s]")
+    typer.echo(f"Report            {out_dir}/  (summary.json, trades.csv, dashboard.png, trades.png)  [{extra['elapsed_s']}s]")
 
 
 @app.command("fetch-exchange-info")

@@ -148,7 +148,8 @@ class PaperExchange:
         self.stats.fees_paid += fee
         del self.positions[pos.symbol]
         trade = Trade(pos.symbol, pos.side, pos.qty, pos.entry_price, price, pos.entry_ts, ts,
-                      gross, pos.entry_fee + fee, pos.funding, reason, pos.risk_usd, pos.reason)
+                      gross, pos.entry_fee + fee, pos.funding, reason, pos.risk_usd, pos.reason,
+                      pos.stop, pos.take_profit)
         self.trades.append(trade)
         for cb in self.on_trade:
             cb(trade)
@@ -160,7 +161,8 @@ class PaperExchange:
         self.balance -= pos.margin
         del self.positions[pos.symbol]
         trade = Trade(pos.symbol, pos.side, pos.qty, pos.entry_price, pos.liq_price, pos.entry_ts, ts,
-                      -pos.margin, pos.entry_fee, pos.funding, "liquidation", pos.risk_usd, pos.reason)
+                      -pos.margin, pos.entry_fee, pos.funding, "liquidation", pos.risk_usd, pos.reason,
+                      pos.stop, pos.take_profit)
         self.trades.append(trade)
         for cb in self.on_trade:
             cb(trade)

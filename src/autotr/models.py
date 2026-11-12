@@ -63,6 +63,8 @@ class Trade:
     exit_reason: str
     risk_usd: float
     entry_reason: str = ""
+    stop: float = 0.0
+    take_profit: float = 0.0
 
     @property
     def net_pnl(self) -> float:
