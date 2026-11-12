@@ -9,7 +9,8 @@ from autotr.models import Bar
 
 @dataclass(slots=True)
 class WarmupBars:
-    """History for (new) symbols: feeds indicators only, never trades."""
+    """History for (new) symbols: feeds indicators only, never trades. Bars may be any interval
+    (1h/5m klines from REST, then 1m); each bar carries its own `interval_ms`."""
     bars: list[Bar]
 
 
@@ -38,7 +39,9 @@ class Funding:
 
 @dataclass(slots=True)
 class Volumes24h:
+    """24h ticker snapshot: quote volume and fractional price change per symbol."""
     quote_volume: dict[str, float] = field(default_factory=dict)
+    change: dict[str, float] = field(default_factory=dict)
 
 
 Event = WarmupBars | KlineClosed | Quote | Funding | Volumes24h

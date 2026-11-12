@@ -35,6 +35,7 @@ class UniverseCfg(BaseModel):
 
 
 class ScannerCfg(BaseModel):
+    rank_by: str = "change_24h"   # change_24h | volatility
     min_quote_volume_24h: float = 50_000_000
     atr_period_bars: int = 48
     top_n: int = 8
@@ -42,13 +43,16 @@ class ScannerCfg(BaseModel):
 
 
 class StrategyCfg(BaseModel):
+    name: str = "confluence"       # confluence | scalper
+    entry_tf_minutes: int = 5
+    structure_tf_minutes: int = 60
     rsi_period: int = 14
     rsi_oversold: float = 30
     rsi_overbought: float = 70
     atr_period: int = 14
     pivot_left: int = 3
     pivot_right: int = 3
-    history_5m_bars: int = 288
+    structure_history_bars: int = 240
     zone_tolerance_atr: float = 0.25
     zone_min_touches: int = 2
     trendline_lookback_pivots: int = 6
@@ -67,6 +71,30 @@ class StrategyCfg(BaseModel):
     trend_slope_bars: int = 6
     min_stop_atr5: float = 0.0
     min_confluence: int = 1
+    # --- confluence strategy
+    rsi_lookback: int = 3
+    rsi_extreme_low: float = 20
+    rsi_extreme_high: float = 80
+    min_score: float = 3.0
+    w_rsi: float = 1.0
+    w_rsi_extreme: float = 0.5
+    w_rsi_turn: float = 0.5
+    w_zone: float = 1.0
+    w_zone_strong: float = 0.5
+    w_channel: float = 1.0
+    w_trendline: float = 1.0
+    w_elliott: float = 1.5
+    use_zones: bool = True
+    use_channels: bool = True
+    use_trendlines: bool = True
+    use_elliott: bool = True
+    use_ladder: bool = True
+    strong_zone_touches: int = 3
+    channel_lookback_pivots: int = 12
+    elliott_strict_overlap: bool = True
+    elliott_max_age_bars: int = 12
+    ladder_weights: list[float] = [0.2, 0.3, 0.5]
+    ladder_expiry_bars: int = 6
 
 
 class RiskCfg(BaseModel):

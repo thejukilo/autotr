@@ -1,6 +1,6 @@
 import pytest
 
-from autotr.config import Config
+from autotr.config import Config, load_config
 from autotr.indicators.levels import Zone
 from autotr.market.features import LevelContext, SymbolState
 from autotr.models import DAY_MS, MINUTE_MS, Bar, Side, Signal, Trade
@@ -66,13 +66,13 @@ def test_min_notional_rejection():
 
 # ---------------------------------------------------------------- strategy
 def _state_with(bars, ctx, rsi_prev, rsi_now, atr1=0.2):
-    cfg = Config()
+    cfg = load_config("config/scalper.yaml")
     st = SymbolState("SOLUSDT", cfg.strategy, cfg.scanner)
     for b in bars:
-        st.bars1.append(b)
+        st.bars_e.append(b)
     st.last_bar = bars[-1]
     st.rsi_prev, st.rsi_now = rsi_prev, rsi_now
-    st.atr1.value = atr1
+    st.atr_e.value = atr1
     st.level_context = lambda: ctx  # type: ignore[method-assign]
     return cfg, st
 
@@ -84,7 +84,7 @@ def _b(t, o, h, l, c):
 def test_long_signal_at_support_zone():
     bars = [_b(0, 100.6, 100.7, 100.1, 100.2), _b(1, 100.2, 100.3, 99.95, 100.1), _b(2, 100.1, 100.5, 100.0, 100.4)]
     ctx = LevelContext([Zone(99.8, 100.0, 3, 0), Zone(102.5, 102.8, 2, 0)], None, None,
-                       atr5=0.5, last5_close=100.3, last5_open_time=0)
+                       atr=0.5, last_close=100.3, last_open_time=0)
     cfg, st = _state_with(bars, ctx, rsi_prev=27, rsi_now=33)
     s = ScalperStrategy(cfg.strategy, cfg.exchange).on_bar(st)
     assert s is not None and s.side is Side.LONG
@@ -95,7 +95,7 @@ def test_long_signal_at_support_zone():
 
 def test_no_signal_without_rsi_cross_or_level():
     bars = [_b(0, 100, 100.2, 99.9, 100.1)] * 3
-    ctx = LevelContext([Zone(95, 95.2, 3, 0)], None, None, atr5=0.5, last5_close=100, last5_open_time=0)
+    ctx = LevelContext([Zone(95, 95.2, 3, 0)], None, None, atr=0.5, last_close=100, last_open_time=0)
     cfg, st = _state_with(bars, ctx, rsi_prev=27, rsi_now=33)
     strat = ScalperStrategy(cfg.strategy, cfg.exchange)
     assert strat.on_bar(st) is None           # zone too far below
@@ -107,7 +107,7 @@ def test_short_signal_rejected_when_target_zone_too_close():
     bars = [_b(0, 100, 100.6, 99.9, 100.4), _b(1, 100.4, 100.95, 100.3, 100.5), _b(2, 100.5, 100.6, 100.2, 100.3)]
     # resistance at 101; support zone just below at 100.1 caps the target -> poor R:R
     ctx = LevelContext([Zone(99.9, 100.1, 2, 0), Zone(101.0, 101.1, 3, 0)], None, None,
-                       atr5=0.5, last5_close=100.4, last5_open_time=0)
+                       atr=0.5, last_close=100.4, last_open_time=0)
     cfg, st = _state_with(bars, ctx, rsi_prev=74, rsi_now=68)
     assert ScalperStrategy(cfg.strategy, cfg.exchange).on_bar(st) is None
 
@@ -115,7 +115,7 @@ def test_short_signal_rejected_when_target_zone_too_close():
 def _long_setup():
     bars = [_b(0, 100.6, 100.7, 100.1, 100.2), _b(1, 100.2, 100.3, 99.95, 100.1), _b(2, 100.1, 100.5, 100.0, 100.4)]
     ctx = LevelContext([Zone(99.8, 100.0, 3, 0), Zone(102.5, 102.8, 2, 0)], None, None,
-                       atr5=0.5, last5_close=100.3, last5_open_time=0)
+                       atr=0.5, last_close=100.3, last_open_time=0)
     return _state_with(bars, ctx, rsi_prev=27, rsi_now=33)
 
 
@@ -143,3 +143,30 @@ def test_min_stop_atr5_widens_stop_and_confluence():
     assert s is not None and s.stop == pytest.approx(100.4 - 1.0)
     cfg.strategy.min_confluence = 2            # only one level present
     assert ScalperStrategy(cfg.strategy, cfg.exchange).on_bar(st) is None
+
+
+@pytest.mark.parametrize("entry_tf,struct_tf", [(5, 60), (1, 5), (15, 60)])
+def test_symbol_state_reports_entry_bars(entry_tf, struct_tf):
+    cfg = Config()
+    cfg.strategy.entry_tf_minutes, cfg.strategy.structure_tf_minutes = entry_tf, struct_tf
+    st = SymbolState("X", cfg.strategy, cfg.scanner)
+    done = [st.on_bar(Bar("X", i * MINUTE_MS, 1, 1.1, 0.9, 1, 1, 1)) for i in range(120)]
+    assert sum(done) == 120 // entry_tf
+    assert len(st.c_s) == 120 // struct_tf
+    assert st.on_bar(Bar("X", 5 * MINUTE_MS, 1, 1, 1, 1, 1, 1)) is False  # duplicate ignored
+
+
+def test_warmup_aggregated_bars_not_double_counted():
+    cfg = Config()  # 5m entry, 1h structure
+    st = SymbolState("X", cfg.strategy, cfg.scanner)
+    H = 60 * MINUTE_MS
+    for h in range(3):  # three closed 1h bars from REST
+        st.warmup_bar(Bar("X", h * H, 1, 1.2, 0.8, 1, 1, 1, H))
+    for i in range(12):  # 5m bars of the last hour from REST
+        st.warmup_bar(Bar("X", 2 * H + i * 5 * MINUTE_MS, 1, 1.1, 0.9, 1, 1, 1, 5 * MINUTE_MS))
+    for m in range(60):  # 1m bars: the 1h/5m bars they complete for hour 2 must be dropped
+        st.on_bar(Bar("X", 2 * H + m * MINUTE_MS, 1, 1.1, 0.9, 1, 1, 1))
+    assert len(st.c_s) == 3 and len(st.bars_e) == 10  # bars_e maxlen 10, but no duplicates added
+    for m in range(60):  # next hour, fresh
+        st.on_bar(Bar("X", 3 * H + m * MINUTE_MS, 1, 1.1, 0.9, 1, 1, 1))
+    assert len(st.c_s) == 4

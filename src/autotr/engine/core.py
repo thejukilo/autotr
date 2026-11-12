@@ -16,7 +16,7 @@ from autotr.models import Bar, Signal
 from autotr.risk.manager import RiskManager
 from autotr.sim.exchange import PaperExchange
 from autotr.sim.filters import FilterBook
-from autotr.strategy.scalper import ScalperStrategy
+from autotr.strategy import make_strategy
 
 log = logging.getLogger(__name__)
 
@@ -26,7 +26,7 @@ class TradingCore:
         self.cfg = cfg
         self.filters = filters or FilterBook()
         self.exchange = exchange or PaperExchange(cfg.exchange, cfg.account.starting_balance)
-        self.strategy = ScalperStrategy(cfg.strategy, cfg.exchange)
+        self.strategy = make_strategy(cfg)
         self.risk = RiskManager(cfg.risk, cfg.exchange, cfg.strategy, self.filters)
         self.scanner = Scanner(cfg.scanner)
         self.states: dict[str, SymbolState] = {}
@@ -41,15 +41,15 @@ class TradingCore:
         return st
 
     def warmup_bar(self, bar: Bar) -> None:
-        """Feed history without trading (live start-up)."""
-        self.state(bar.symbol).on_bar(bar)
+        """Feed history without trading (any interval: 1m, or pre-aggregated entry/structure bars)."""
+        self.state(bar.symbol).warmup_bar(bar)
 
     def on_bar_closed(self, bar: Bar) -> Signal | None:
         """Process a closed bar *after* the exchange has seen it (fills/exits)."""
         st = self.state(bar.symbol)
-        st.on_bar(bar)
+        entry_closed = st.on_bar(bar)
         self.risk.update_clock(bar.close_time, self.exchange.equity())
-        if bar.symbol not in self.scanner.active:
+        if not entry_closed or bar.symbol not in self.scanner.active:
             return None
         sig = self.strategy.on_bar(st)
         if sig is None:
@@ -61,8 +61,9 @@ class TradingCore:
             cb(sig, accepted)
         return sig
 
-    def maybe_rescan(self, ts: int, volume_24h: dict[str, float] | None = None) -> bool:
+    def maybe_rescan(self, ts: int, volume_24h: dict[str, float] | None = None,
+                     change_24h: dict[str, float] | None = None) -> bool:
         if not self.scanner.due(ts):
             return False
-        self.scanner.scan(self.states, ts, volume_24h)
+        self.scanner.scan(self.states, ts, volume_24h, change_24h)
         return True

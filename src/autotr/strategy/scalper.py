@@ -34,39 +34,39 @@ class ScalperStrategy:
     # ----------------------------------------------------------------- helpers
     def _support_levels(self, st: SymbolState, ctx: LevelContext, price: float, now_ts: int) -> list[_Level]:
         c = self.cfg
-        prox = c.proximity_atr * ctx.atr5
-        recent_low = min(b.low for b in list(st.bars1)[-c.touch_lookback_bars:])
+        prox = c.proximity_atr * ctx.atr
+        recent_low = min(b.low for b in list(st.bars_e)[-c.touch_lookback_bars:])
         out: list[_Level] = []
         for z in ctx.zones:
             if z.low > price:
                 break  # zones are sorted ascending; the rest are above price
-            if recent_low <= z.high + prox and ctx.last5_close >= z.low:
+            if recent_low <= z.high + prox and ctx.last_close >= z.low:
                 out.append(_Level(z.low, f"support zone x{z.touches}"))
         line = ctx.support_line
         if line is not None:
             v = line.value_at(now_ts)
-            v5 = line.value_at(ctx.last5_open_time)
-            tol = c.trendline_break_tolerance_atr * ctx.atr5
-            if v < price and recent_low <= v + prox and ctx.last5_close >= v5 - tol:
+            v5 = line.value_at(ctx.last_open_time)
+            tol = c.trendline_break_tolerance_atr * ctx.atr
+            if v < price and recent_low <= v + prox and ctx.last_close >= v5 - tol:
                 out.append(_Level(v, f"rising trendline x{line.touches}"))
         return out
 
     def _resistance_levels(self, st: SymbolState, ctx: LevelContext, price: float, now_ts: int) -> list[_Level]:
         c = self.cfg
-        prox = c.proximity_atr * ctx.atr5
-        recent_high = max(b.high for b in list(st.bars1)[-c.touch_lookback_bars:])
+        prox = c.proximity_atr * ctx.atr
+        recent_high = max(b.high for b in list(st.bars_e)[-c.touch_lookback_bars:])
         out: list[_Level] = []
         for z in reversed(ctx.zones):
             if z.high < price:
                 break
-            if recent_high >= z.low - prox and ctx.last5_close <= z.high:
+            if recent_high >= z.low - prox and ctx.last_close <= z.high:
                 out.append(_Level(z.high, f"resistance zone x{z.touches}"))
         line = ctx.resistance_line
         if line is not None:
             v = line.value_at(now_ts)
-            v5 = line.value_at(ctx.last5_open_time)
-            tol = c.trendline_break_tolerance_atr * ctx.atr5
-            if v > price and recent_high >= v - prox and ctx.last5_close <= v5 + tol:
+            v5 = line.value_at(ctx.last_open_time)
+            tol = c.trendline_break_tolerance_atr * ctx.atr
+            if v > price and recent_high >= v - prox and ctx.last_close <= v5 + tol:
                 out.append(_Level(v, f"falling trendline x{line.touches}"))
         return out
 
@@ -90,10 +90,10 @@ class ScalperStrategy:
             return None  # cheap exit: most bars stop here
 
         ctx = st.level_context()
-        if ctx is None or st.atr1.value is None:
+        if ctx is None or st.atr_e.value is None:
             return None
         bar = st.last_bar
-        price, now_ts, atr1 = bar.close, bar.close_time, float(st.atr1.value)
+        price, now_ts, atr1 = bar.close, bar.close_time, float(st.atr_e.value)
         side = Side.LONG if go_long else Side.SHORT
         if c.trend_filter:
             slope = st.ema_slope
@@ -106,7 +106,7 @@ class ScalperStrategy:
                 return None
             level = max(levels, key=lambda lv: lv.price)  # closest support below price
             stop = level.price - c.stop_buffer_atr * atr1
-            stop = min(stop, price * (1 - c.min_stop_pct), price - c.min_stop_atr5 * ctx.atr5)
+            stop = min(stop, price * (1 - c.min_stop_pct), price - c.min_stop_atr5 * ctx.atr)
             if price - stop > price * c.max_stop_pct:
                 return None
             risk = price - stop
@@ -120,7 +120,7 @@ class ScalperStrategy:
                 return None
             level = min(levels, key=lambda lv: lv.price)  # closest resistance above price
             stop = level.price + c.stop_buffer_atr * atr1
-            stop = max(stop, price * (1 + c.min_stop_pct), price + c.min_stop_atr5 * ctx.atr5)
+            stop = max(stop, price * (1 + c.min_stop_pct), price + c.min_stop_atr5 * ctx.atr)
             if stop - price > price * c.max_stop_pct:
                 return None
             risk = stop - price

@@ -4,8 +4,10 @@ A **simulated** scalping bot for **Binance USDⓈ-M perpetual futures**. It read
 data, but every order is executed by a built-in paper exchange. **No API key is needed and no real
 money is used.**
 
-- Trades only the most volatile, liquid USDT perpetuals (rescanned every 15 min)
-- Entry signals on **1m** candles; support/resistance and trendlines on **5m**
+- Trades the coins with the **biggest 24h moves** among liquid USDT perpetuals (rescanned every 15 min)
+- **Confluence strategy** modelled on a manual method: RSI extreme + support/resistance, channels,
+  trendlines and Elliott wave-5 fades, scored together; signals on **5m**, structure on **1h**
+- **Laddered limit entries** (3 orders, 20/30/50%), stop beyond the structure, target at the opposite level
 - Paper account starts at **$100**, **5x isolated leverage**, **2% risk per trade**
 - Realistic simulation: taker/maker fees, slippage, funding payments, liquidation price, lot size and
   minimum-notional rules
@@ -32,11 +34,13 @@ Requirements: internet access to Binance (some countries and corporate networks 
 ## Usage
 
 ```bash
-# 1. Download history (1m candles + funding) from data.binance.vision — about 60 MB for 30 days
-uv run autotr download --days 30
+# 1. Download history (1m candles + funding) from data.binance.vision (~2 MB per coin per day).
+#    The strategy needs ~11 days of warm-up before the first backtest day.
+uv run autotr download --days 45
 
-# 2. Backtest. Writes reports/<timestamp>/summary.json, trades.csv and equity.png
+# 2. Backtest. Writes reports/<timestamp>/summary.json, trades.csv, dashboard.png and trades.png
 uv run autotr backtest --days 29
+uv run autotr ablation --start 2026-07-26 --end 2026-11-10   # what each strategy component adds
 
 # 3. Replay recent history through the *live* engine (quick end-to-end check, no Binance API needed)
 uv run autotr live --replay --start 2026-11-08 --end 2026-11-10
@@ -84,14 +88,21 @@ Binance WebSocket ─┐                        ┌─ Scanner: top 8 by 5m vola
                                                 liquidation → trade log (SQLite / CSV)
 ```
 
-**Strategy (`src/autotr/strategy/scalper.py`)**: mean reversion at levels.
-- **Long** when 1m RSI crosses back **above 30** and, within the last 3 candles, price touched a
-  **support zone** (a cluster of at least 2 swing highs/lows on 5m) or a **rising trendline** through
-  5m swing lows, without breaking through it.
-- **Short** is the mirror image: RSI crosses back **below 70** at resistance or a falling trendline.
-- **Stop** just beyond the level (0.5 × ATR(1m)), never closer than 0.15% or wider than 3%.
-- **Target** 2R, or the next opposing zone if that's closer. Trades whose reward:risk **after fees** is
-  below 1.2 are skipped. **Time stop** after 30 minutes.
+**Strategy (`src/autotr/strategy/confluence.py`)** — the manual method, scored:
+1. **Coins**: the 8 biggest 24h movers with at least $50M of 24h volume.
+2. **RSI gate** (5m): oversold (≤30) for longs / overbought (≥70) for shorts within the last 3 candles.
+3. **Score** on 1h structure: RSI (+1), RSI ≤20/≥80 (+0.5), RSI turning back (+0.5), at an S/R zone
+   (+1, +0.5 if touched ≥3 times), at a channel edge (+1), at a trendline (+1), completed Elliott
+   5-wave impulse to fade (+1.5). A trade needs **≥3 points**.
+4. **Ladder**: three limit orders from just inside the price to the level, 20% / 30% / 50%
+   (biggest closest to the level). Unfilled orders cancel after 30 minutes.
+5. **Stop** beyond the structure the setup relies on (zone, channel edge, trendline or the wave-5
+   extreme). **Target** at the first opposing zone / channel edge / wave-4 area that pays at least
+   1.5× the risk after fees. Time stop 12h.
+
+Every component can be switched off in the config (`use_zones`, `use_channels`, `use_trendlines`,
+`use_elliott`, `use_ladder`); `uv run autotr ablation --start … --end …` measures what each one
+contributes. The original 1m scalper is still available: `--config config/scalper.yaml`.
 
 **Risk (`src/autotr/risk/manager.py`)**
 - Size = 2% of equity ÷ (stop distance + fees + slippage), capped at 50% of equity as margin per
@@ -112,24 +123,29 @@ Binance WebSocket ─┐                        ┌─ Scanner: top 8 by 5m vola
 
 ## Current results
 
-Baseline backtest, **2026-10-12 → 2026-11-10** (30 days, 34 coins, default settings):
+All backtests below use 34 coins, $100 start, 5x leverage, 2% risk, realistic fees. **None is
+profitable yet.**
 
-| | |
-|---|---|
-| Balance | $100.00 → **$42.52 (−57.5%)** |
-| Trades | 173 (5.8/day), win rate 30.6%, profit factor 0.48 |
-| Gross PnL / fees | −$31.37 / **−$26.10** |
-| Max drawdown | 57.7% |
+**Ablation, 2026-07-26 → 2026-11-10 (108 days)** — `reports/ablation/ablation.txt`:
 
-Two lessons: the raw signal has **no edge** in this form, and **fees roughly double the loss**. Each
-round trip costs about 0.1% of position size, which is a large share of a $1–2 risk per trade. Ideas
-to explore next:
+| Variant | Return | Trades | Win rate | Profit factor | Fees |
+|---|---|---|---|---|---|
+| Full confluence method | −84.4% | 849 | 33% | 0.75 | $44.38 |
+| …without ladder (single market entry) | −95.7% | 720 | 26% | 0.65 | $49.28 |
+| …without S/R zones | −47.4% | 316 | 34% | 0.75 | $25.56 |
+| …without channels | −82.6% | 836 | 35% | 0.75 | $43.64 |
+| …without trendlines | −87.2% | 818 | 34% | 0.71 | $39.82 |
+| …without Elliott | −81.5% | 834 | 34% | 0.77 | $47.95 |
+| …scanner by volatility instead of 24h change | −79.6% | 907 | 36% | 0.79 | $45.58 |
+| Old 1m scalper | −92.2% | 716 | 35% | 0.65 | $64.03 |
 
-- Only trade **with the 5m/15m trend** (longs lost the most here)
-- Require **confluence** (zone + trendline) and stronger levels (≥ 3 touches)
-- Fewer but better trades: wider targets, a longer time stop, or 5m entry signals
-- Limit-order entries (maker fee) instead of market orders
-- Always compare across several separate periods to avoid overfitting one month
+What the data says:
+- **Laddering helps** — clearly better than a single market entry (profit factor 0.75 vs 0.65).
+- **Trades that fill all 3 rungs lose** (21% win rate, the bulk of the losses): when price runs
+  through the whole ladder the level is usually breaking. Trades that fill only the first rung win
+  58% of the time.
+- **No single component makes it profitable**; channels and Elliott fades slightly hurt, trendlines
+  slightly help. Before fees the method is roughly break-even, so fees decide the result.
 
 ## Project layout
 
@@ -137,9 +153,9 @@ to explore next:
 config/default.yaml      all settings
 src/autotr/
   data/                  historical downloader, Binance REST + WebSocket feed, replay
-  indicators/            RSI, ATR, pivots, S/R zones, trendlines
+  indicators/            RSI, ATR, pivots, S/R zones, trendlines, channels, Elliott waves
   market/                1m→5m aggregation, per-symbol feature state, volatility scanner
-  strategy/              scalper strategy
+  strategy/              confluence strategy (manual method) and the old scalper
   risk/                  position sizing and account guards
   sim/                   paper exchange and symbol filters
   engine/                shared core, backtest engine, live engine

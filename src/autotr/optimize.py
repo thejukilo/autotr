@@ -46,6 +46,8 @@ class RunResult:
 def apply_params(cfg: Config, params: dict[str, Any]) -> Config:
     c = cfg.model_copy(deep=True)
     for key, val in params.items():
+        if key.startswith("_"):
+            continue  # private bookkeeping keys (e.g. ablation variant id)
         section, name = key.split(".")
         if name == "rsi_levels":
             c.strategy.rsi_oversold, c.strategy.rsi_overbought = val
@@ -92,9 +94,10 @@ def _init(job: dict) -> None:
 
 def run_grid(cfg: Config, start: date, end: date, symbols: list[str],
              grid: dict[str, list[Any]] | None = None, workers: int | None = None,
-             on_result=None) -> list[RunResult]:
+             on_result=None, points: list[dict[str, Any]] | None = None) -> list[RunResult]:
+    """Backtest every grid combination (or the explicit `points`) in parallel worker processes."""
     global _HISTORY
-    points = grid_points(grid or DEFAULT_GRID)
+    points = points if points is not None else grid_points(grid or DEFAULT_GRID)
     job = {"cfg": cfg, "start": start, "end": end, "symbols": symbols}
     ctx_name = "fork" if "fork" in mp.get_all_start_methods() else "spawn"
     if ctx_name == "fork":
@@ -135,3 +138,22 @@ def describe(params: dict[str, Any]) -> str:
         else:
             parts.append(f"{name}={v}")
     return ", ".join(parts)
+
+
+SCALPER_OVERRIDES: dict[str, Any] = {
+    "strategy.name": "scalper", "strategy.entry_tf_minutes": 1, "strategy.structure_tf_minutes": 5,
+    "strategy.structure_history_bars": 288, "scanner.rank_by": "volatility",
+    "strategy.min_reward_risk_after_fees": 1.2, "strategy.max_stop_pct": 0.03,
+    "strategy.time_stop_minutes": 30, "strategy.cooldown_minutes": 5,
+}
+
+ABLATION: list[tuple[str, dict[str, Any]]] = [
+    ("full method", {}),
+    ("no ladder (single market entry)", {"strategy.use_ladder": False}),
+    ("no S/R zones", {"strategy.use_zones": False}),
+    ("no channels", {"strategy.use_channels": False}),
+    ("no trendlines", {"strategy.use_trendlines": False}),
+    ("no Elliott", {"strategy.use_elliott": False}),
+    ("scanner: volatility instead of 24h change", {"scanner.rank_by": "volatility"}),
+    ("old 1m scalper", SCALPER_OVERRIDES),
+]

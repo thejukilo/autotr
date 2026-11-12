@@ -29,37 +29,74 @@ universe:
   live_candidates: 40        # live: top-N symbols by 24h volume to watch
 
 scanner:
+  rank_by: change_24h              # change_24h (biggest 24h movers) | volatility (5m ATR%)
   min_quote_volume_24h: 50000000   # $50M
-  atr_period_bars: 48              # 5m bars → last 4h
+  atr_period_bars: 48              # 5m bars → last 4h (volatility ranking)
   top_n: 8
   rescan_minutes: 15
 
 strategy:
+  name: confluence                 # confluence (manual method) | scalper (old 1m strategy, see config/scalper.yaml)
+  entry_tf_minutes: 5              # signals, RSI and ladder on 5m candles
+  structure_tf_minutes: 60         # S/R zones, trendlines, channels, Elliott waves on 1h candles
+  structure_history_bars: 240      # 10 days of 1h candles
+
+  # RSI gate: oversold/overbought within the last `rsi_lookback` entry bars
   rsi_period: 14
   rsi_oversold: 30
   rsi_overbought: 70
+  rsi_extreme_low: 20
+  rsi_extreme_high: 80
+  rsi_lookback: 3
+
+  # Score: a trade needs min_score points (RSI alone is at most 2)
+  min_score: 3.0
+  w_rsi: 1.0
+  w_rsi_extreme: 0.5
+  w_rsi_turn: 0.5
+  w_zone: 1.0
+  w_zone_strong: 0.5               # zone touched >= strong_zone_touches times
+  w_channel: 1.0
+  w_trendline: 1.0
+  w_elliott: 1.5
+  use_zones: true
+  use_channels: true
+  use_trendlines: true
+  use_elliott: true
+  use_ladder: true
+
+  # Structure detection (1h)
   atr_period: 14
   pivot_left: 3
   pivot_right: 3
-  history_5m_bars: 288             # 24h of 5m bars used for levels/trendlines
-  zone_tolerance_atr: 0.25         # cluster pivots within this × ATR(5m)
+  zone_tolerance_atr: 0.25         # cluster pivots within this × ATR
   zone_min_touches: 2
-  trendline_lookback_pivots: 6     # consider the last N pivots of each kind
+  strong_zone_touches: 3
+  trendline_lookback_pivots: 6
   trendline_break_tolerance_atr: 0.1
-  proximity_atr: 0.3               # price must come within this × ATR(5m) of the level
-  touch_lookback_bars: 3           # 1m bars in which the level touch may have happened
-  stop_buffer_atr: 0.5             # stop beyond level by this × ATR(1m)
-  min_stop_pct: 0.0015             # 0.15% minimum stop distance
-  max_stop_pct: 0.03               # skip setups needing a stop wider than 3%
-  take_profit_r: 2.0               # 1.5R + fees rarely clears min R:R on tight stops
-  min_reward_risk_after_fees: 1.2
-  time_stop_minutes: 30
-  cooldown_minutes: 5
-  trend_filter: false              # true: no longs while the 5m EMA falls, no shorts while it rises
-  trend_ema_period: 50             # 5m bars (~4h)
-  trend_slope_bars: 6              # EMA slope measured over this many 5m bars (30 min)
-  min_stop_atr5: 0.0               # stop at least this × ATR(5m) from entry (room for 1m noise)
-  min_confluence: 1                # number of levels (zones/trendlines) that must agree
+  channel_lookback_pivots: 12
+  elliott_strict_overlap: true     # wave 4 may not enter wave-1 territory
+  elliott_max_age_bars: 12         # fade only within 12 structure bars of the wave-5 extreme
+  proximity_atr: 0.3               # "at the level" = within this × structure ATR
+  touch_lookback_bars: 3           # entry bars in which the touch may have happened
+
+  # Ladder, stop, target
+  ladder_weights: [0.2, 0.3, 0.5]  # nearest rung first; biggest order closest to the level
+  ladder_expiry_bars: 6            # unfilled rungs cancel after 6 entry bars (30 min)
+  stop_buffer_atr: 0.5             # stop beyond the structure by this × entry ATR
+  min_stop_pct: 0.0015
+  max_stop_pct: 0.04
+  min_reward_risk_after_fees: 1.5
+  time_stop_minutes: 720           # close after 12h if neither stop nor target hit
+  cooldown_minutes: 30
+
+  # Used by the scalper strategy only
+  take_profit_r: 2.0
+  trend_filter: false
+  trend_ema_period: 50
+  trend_slope_bars: 6
+  min_stop_atr5: 0.0
+  min_confluence: 1
 
 risk:
   risk_per_trade: 0.02             # 2% of equity

@@ -88,12 +88,16 @@ def backtest(
     plot_equity(res.equity, ex.trades, cfg.account.starting_balance, out_dir / "equity.png",
                 title=f"autotr backtest {start_d} .. {end_d}  ({len(res.symbols)} symbols)")
     from autotr.report.visualize import plot_dashboard, plot_trade_gallery
-    label = f"Backtest {start_d} → {end_d}  ·  {len(res.symbols)} coins  ·  1m scalper"
+    sc = cfg.strategy
+    strat = (f"{sc.name} ({sc.entry_tf_minutes}m entries, {sc.structure_tf_minutes // 60 or sc.structure_tf_minutes}"
+             f"{'h' if sc.structure_tf_minutes >= 60 else 'm'} structure)")
+    label = f"Backtest {start_d} → {end_d}  ·  {len(res.symbols)} coins  ·  {strat}"
     plot_dashboard(ex.trades, res.equity, m, out_dir / "dashboard.png", label)
     plot_trade_gallery(cfg, ex.trades, out_dir / "trades.png", f"{label}  ·  best wins (top) and typical losses (bottom)")
     extra = {
         "signals": len(res.core.signals),
         "risk_rejections": dict(res.core.risk.rejections),
+        "rungs_filled": ex.stats.rungs_filled,
         "entries_filled": ex.stats.entries_filled,
         "entries_cancelled_at_fill": ex.stats.entries_cancelled,
         "liquidations": ex.stats.liquidations,
@@ -108,6 +112,10 @@ def backtest(
     typer.echo(format_summary(m))
     typer.echo(f"Signals           {extra['signals']}  (risk rejections: {extra['risk_rejections']}, "
                f"cancelled at fill: {extra['entries_cancelled_at_fill']}, liquidations: {extra['liquidations']})")
+    from autotr.optimize import monthly_returns
+    months = monthly_returns(ex.trades, cfg.account.starting_balance)
+    if months:
+        typer.echo("Per month         " + "  ".join(f"{k}: {v:+.1f}%" for k, v in months.items()))
     typer.echo(f"Report            {out_dir}/  (summary.json, trades.csv, dashboard.png, trades.png)  [{extra['elapsed_s']}s]")
 
 
@@ -348,6 +356,51 @@ def optimize(
         f"{rows[1][3]['return_pct']:+.1f}%\n"
         + yaml.safe_dump({"strategy": {k: getattr(best_cfg.strategy, k) for k in keys}}, sort_keys=True))
     typer.echo(f"Saved {out}/optimized.yaml (use with --config), grid_train.csv, test_baseline/, test_optimized/")
+
+
+@app.command()
+def ablation(
+    start: str = typer.Option(..., help="First day YYYY-MM-DD"),
+    end: str = typer.Option(..., help="Last day YYYY-MM-DD"),
+    symbols: Optional[str] = typer.Option(None, help="Comma-separated symbols (default: config universe)"),
+    workers: Optional[int] = typer.Option(None),
+    out: Path = typer.Option(Path("reports/ablation")),
+    config: Optional[Path] = ConfigOpt,
+) -> None:
+    """Switch each part of the strategy off in turn to see what it contributes."""
+    import time
+
+    from autotr.optimize import ABLATION, run_grid
+
+    _setup_logging(False)
+    logging.getLogger("autotr").setLevel(logging.WARNING)
+    cfg = load_config(config)
+    d0, d1 = _parse_date(start), _parse_date(end)
+    syms = _symbols(symbols, cfg.universe.symbols)
+    labels = {i: name for i, (name, _) in enumerate(ABLATION)}
+    points = [dict(params, **{"_id": i}) for i, (_, params) in enumerate(ABLATION)]
+    t0 = time.time()
+    typer.echo(f"Ablation {d0} .. {d1}: {len(points)} variants, {len(syms)} coins")
+
+    def progress(r, i, n):
+        m = r.metrics
+        typer.echo(f"  [{i}/{n} {time.time() - t0:4.0f}s] {labels[r.params['_id']]:42s} "
+                   f"{m['return_pct']:+7.1f}%  {m['trades']:4d} trades  avg {m['expectancy_r']:+.3f}R")
+
+    results = run_grid(cfg, d0, d1, syms, workers=workers, on_result=progress, points=points)
+    results.sort(key=lambda r: r.params["_id"])
+    out.mkdir(parents=True, exist_ok=True)
+    months = sorted({k for r in results for k in r.monthly})
+    hdr = f"  {'variant':42s} {'return':>8} {'trades':>6} {'win':>5} {'avg R':>7} {'PF':>5} {'maxDD':>6} {'fees':>7}  " + " ".join(f"{m[2:]:>7}" for m in months)
+    lines = [hdr]
+    for r in results:
+        m = r.metrics
+        lines.append(f"  {labels[r.params['_id']]:42s} {m['return_pct']:+7.1f}% {m['trades']:6d} {m['win_rate']:5.0%} "
+                     f"{m['expectancy_r']:+7.3f} {m['profit_factor']:5.2f} {m['max_drawdown_pct']:5.1f}% {m['fees']:7.2f}  "
+                     + " ".join(f"{r.monthly.get(mo, 0.0):+6.1f}%" for mo in months))
+    typer.echo("\n" + "\n".join(lines))
+    (out / "ablation.txt").write_text("\n".join(lines) + "\n")
+    typer.echo(f"\nSaved {out}/ablation.txt")
 
 
 if __name__ == "__main__":

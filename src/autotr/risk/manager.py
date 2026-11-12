@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 
 from autotr.config import ExchangeCfg, RiskCfg, StrategyCfg
 from autotr.models import DAY_MS, MINUTE_MS, Signal, Trade
-from autotr.sim.exchange import PaperExchange, PendingEntry, liquidation_price
+from autotr.sim.exchange import PaperExchange, PendingEntry, Rung, liquidation_price
 from autotr.sim.filters import FilterBook
 
 
@@ -71,38 +71,62 @@ class RiskManager:
             return self._reject("cooldown")
 
         f = self.filters.get(sig.symbol, sig.ref_price)
-        entry = sig.ref_price
         stop = f.round_price(sig.stop)
         tp = f.round_price(sig.take_profit)
         s = sig.side.sign
-        stop_dist = s * (entry - stop)
-        if stop_dist <= 0 or s * (tp - entry) <= 0:
+        slip = xc.slippage_bps / 10_000
+        exit_cost = xc.taker_fee + slip
+        ladder = bool(sig.ladder) and self.strat_cfg.use_ladder
+        if ladder:
+            levels = [(f.round_price(p), w) for p, w in sig.ladder]  # type: ignore[union-attr]
+            entry_cost = xc.maker_fee          # resting limit orders
+        else:
+            levels = [(sig.ref_price, 1.0)]    # single market order
+            entry_cost = xc.taker_fee + slip
+        if any(s * (p - stop) <= 0 or s * (tp - p) <= 0 for p, _ in levels):
             return self._reject("invalid_levels")
 
-        cost_rate = xc.taker_fee + xc.slippage_bps / 10_000
-        per_unit_loss = stop_dist + entry * cost_rate + stop * cost_rate
+        def unit_loss(p: float) -> float:
+            return s * (p - stop) + p * entry_cost + stop * exit_cost
+
         equity = ex.equity()
         risk_budget = equity * cfg.risk_per_trade
-        qty = risk_budget / per_unit_loss
-
+        avg_price = sum(p * w for p, w in levels)
+        qty = risk_budget / sum(w * unit_loss(p) for p, w in levels)  # full fill risks exactly the budget
         max_notional = min(
             equity * cfg.max_margin_per_position * xc.leverage,
             max(ex.available_balance(), 0.0) * xc.leverage * 0.98,  # leave room for fees
         )
-        qty = min(qty, max_notional / entry)
-        qty = f.round_qty(qty)
-        if qty < f.min_qty or qty * entry < f.min_notional:
+        qty = min(qty, max_notional / avg_price)
+
+        # Split into rungs; a rung below the exchange minimum is merged into the next (deeper) one.
+        rungs: list[Rung] = []
+        carry = 0.0
+        for p, w in levels:
+            raw = qty * w + carry
+            q = f.round_qty(raw)
+            if q < f.min_qty or q * p < f.min_notional:
+                carry = raw
+                continue
+            rungs.append(Rung(p if ladder else None, q))
+            carry = 0.0
+        if not rungs:
             return self._reject("below_min_notional")
 
-        liq = liquidation_price(sig.side, entry, xc.leverage, xc.maintenance_margin_rate)
+        worst_entry = max(r_p for r_p, _ in levels) if s > 0 else min(r_p for r_p, _ in levels)
+        liq = liquidation_price(sig.side, worst_entry, xc.leverage, xc.maintenance_margin_rate)
         if s * (stop - liq) <= 0:
             return self._reject("stop_beyond_liquidation")
 
         st.trades_today += 1
+        prices = [r.price if r.price is not None else sig.ref_price for r in rungs]
+        expiry = (sig.ts + self.strat_cfg.ladder_expiry_bars * self.strat_cfg.entry_tf_minutes * MINUTE_MS
+                  if ladder else None)
         return PendingEntry(
-            symbol=sig.symbol, side=sig.side, qty=qty, stop=stop, take_profit=tp,
-            risk_usd=qty * per_unit_loss, created_ts=sig.ts,
+            symbol=sig.symbol, side=sig.side, qty=sum(r.qty for r in rungs), stop=stop, take_profit=tp,
+            risk_usd=sum(r.qty * unit_loss(p) for r, p in zip(rungs, prices)), created_ts=sig.ts,
             time_stop_ms=self.strat_cfg.time_stop_minutes * MINUTE_MS, reason=sig.reason,
+            rungs=rungs, expiry_ts=expiry,
         )
 
     # ------------------------------------------------------------ persistence

@@ -16,7 +16,7 @@ from autotr.models import DAY_MS, MINUTE_MS
 from autotr.report.tradelog import LiveStore
 
 SYMBOLS = ["AAAUSDT", "BBBUSDT", "CCCUSDT"]
-DAYS = [date(2026, 1, 1), date(2026, 1, 2), date(2026, 1, 3), date(2026, 1, 4)]
+DAYS = [date(2026, 1, d) for d in range(1, 9)]   # 8 days: confluence needs days of 1h structure
 
 
 def _write_synthetic(data_dir):
@@ -42,10 +42,13 @@ def _write_synthetic(data_dir):
             df.iloc[i * 1440:(i + 1) * 1440].to_parquet(p, index=False)
 
 
-@pytest.fixture()
-def cfg(tmp_path):
+@pytest.fixture(params=["scalper", "confluence"])
+def cfg(request, tmp_path):
     _write_synthetic(tmp_path / "data")
-    c = load_config()
+    c = load_config("config/scalper.yaml") if request.param == "scalper" else load_config()
+    if request.param == "confluence":
+        c.strategy.structure_history_bars = 96   # 4 days of 1h: fits the synthetic data
+        c.strategy.min_score = 2.5               # synthetic data: make sure some trades happen
     c.data.dir = str(tmp_path / "data")
     c.universe.symbols = SYMBOLS
     c.scanner.min_quote_volume_24h = 0
@@ -55,7 +58,7 @@ def cfg(tmp_path):
 
 
 def test_replay_matches_backtest(cfg, tmp_path):
-    start, end = DAYS[1], DAYS[-1]
+    start, end = DAYS[5], DAYS[-1]
     bt = run_backtest(cfg, start, end, SYMBOLS, progress=False)
     bt_trades = [t for t in bt.core.exchange.trades if t.exit_reason != "end_of_backtest"]
     assert len(bt_trades) >= 3, "synthetic data should produce some trades"
@@ -73,7 +76,7 @@ def test_replay_matches_backtest(cfg, tmp_path):
 
 
 def test_live_state_survives_restart(cfg, tmp_path):
-    start, end = DAYS[1], DAYS[-1]
+    start, end = DAYS[5], DAYS[-1]
     h = load_history(cfg, start, end, SYMBOLS)
     db = tmp_path / "live.db"
 

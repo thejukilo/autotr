@@ -33,6 +33,8 @@ MUTED = "#8a8984"
 BLUE = "#2a78d6"      # profit / take-profit (diverging pole)
 RED = "#e34948"       # loss / stop (diverging pole)
 VIOLET = "#6250d6"    # trendline
+AQUA = "#1baf7a"      # channel
+ORANGE = "#eb6834"    # Elliott wave count
 ZONE = "#d9d7cf"      # S/R zone band (neutral)
 CANDLE_UP = "#c3c2b7"
 CANDLE_DOWN = "#52514e"
@@ -164,22 +166,43 @@ def _bars_df(store: HistoricalStore, symbol: str, t_from: int, t_to: int):
     return df[(df.open_time >= t_from) & (df.open_time < t_to)].reset_index(drop=True)
 
 
-def _context_at(cfg: Config, df, entry_ts: int, symbol: str):
+def _resample(df, tf_ms: int):
+    """Aggregate 1m rows into `tf_ms` candles (UTC-aligned)."""
+    if tf_ms == MINUTE_MS or df.empty:
+        return df.reset_index(drop=True)
+    g = df.groupby(df.open_time - df.open_time % tf_ms)
+    out = g.agg(open=("open", "first"), high=("high", "max"), low=("low", "min"), close=("close", "last"))
+    out.index.name = "open_time"
+    return out.reset_index()
+
+
+def _context_at(cfg: Config, df, ts: int, symbol: str):
     st = SymbolState(symbol, cfg.strategy, cfg.scanner)
-    for r in df[df.open_time < entry_ts].itertuples(index=False):
+    for r in df[df.open_time < ts].itertuples(index=False):
         st.on_bar(Bar(symbol, int(r.open_time), r.open, r.high, r.low, r.close, r.volume, r.quote_volume))
     return st.level_context()
 
 
-def _draw_trade(cfg: Config, store: HistoricalStore, t: Trade, ax, ax_rsi) -> None:
-    before, after = 90 * MINUTE_MS, 25 * MINUTE_MS
-    hist = _bars_df(store, t.symbol, t.entry_ts - 2 * DAY_MS, t.exit_ts + after)
-    ctx = _context_at(cfg, hist, t.entry_ts, t.symbol)
-    w = hist[(hist.open_time >= t.entry_ts - before) & (hist.open_time < t.exit_ts + after)]
-    x = np.array([_dt(int(v)) for v in w.open_time])
-    rs = rsi_series(hist.close.to_numpy(), cfg.strategy.rsi_period)[w.index]
+def _tf_label(minutes: int) -> str:
+    return f"{minutes // 60}h" if minutes % 60 == 0 else f"{minutes}m"
 
-    # zones (only those near the visible range)
+
+def _draw_trade(cfg: Config, store: HistoricalStore, t: Trade, ax, ax_rsi) -> None:
+    from autotr.data.replay import warmup_days
+
+    sc = cfg.strategy
+    tf = sc.entry_tf_minutes * MINUTE_MS
+    sig_ts = t.signal_ts or t.entry_ts
+    hist = _bars_df(store, t.symbol, sig_ts - warmup_days(cfg) * DAY_MS, t.exit_ts + 12 * tf)
+    ctx = _context_at(cfg, hist, sig_ts, t.symbol)
+    candles = _resample(hist, tf)
+    rs_all = rsi_series(candles.close.to_numpy(), sc.rsi_period)
+    win_mask = (candles.open_time >= sig_ts - 60 * tf) & (candles.open_time < t.exit_ts + 12 * tf)
+    w = candles[win_mask]
+    rs = rs_all[win_mask.to_numpy()]
+    x = np.array([_dt(int(v)) for v in w.open_time])
+    t_first, t_last = int(w.open_time.iloc[0]), int(w.open_time.iloc[-1])
+
     lo, hi = w.low.min(), w.high.max()
     pad = (hi - lo) * 0.15
     if ctx is not None:
@@ -189,81 +212,111 @@ def _draw_trade(cfg: Config, store: HistoricalStore, t: Trade, ax, ax_rsi) -> No
         for line in (ctx.support_line, ctx.resistance_line):
             if line is None:
                 continue
-            ts0 = max(line.t1, int(w.open_time.iloc[0]))
-            ts1 = int(w.open_time.iloc[-1])
-            ax.plot([_dt(ts0), _dt(ts1)], [line.value_at(ts0), line.value_at(ts1)], color=VIOLET,
+            ts0 = max(line.t1, t_first)
+            ax.plot([_dt(ts0), _dt(t_last)], [line.value_at(ts0), line.value_at(t_last)], color=VIOLET,
                     linewidth=2, solid_capstyle="round", zorder=2)
+        ch = ctx.channel
+        if ch is not None:
+            ts0 = max(ch.t0, t_first)
+            xs = [_dt(ts0), _dt(t_last)]
+            ax.fill_between(xs, [ch.lower(ts0), ch.lower(t_last)], [ch.upper(ts0), ch.upper(t_last)],
+                            color=AQUA, alpha=0.08, linewidth=0, zorder=1)
+            for f in (ch.lower, ch.upper):
+                ax.plot(xs, [f(ts0), f(t_last)], color=AQUA, linewidth=1.6, zorder=2)
+        imp = ctx.impulse
+        if imp is not None:
+            pts = [p for p in imp.points if p.ts >= t_first]
+            if pts:
+                ax.plot([_dt(p.ts) for p in pts], [p.price for p in pts], color=ORANGE, linewidth=1.2,
+                        zorder=2, marker="o", markersize=4)
+                for i, p in enumerate(imp.points):
+                    if p.ts >= t_first:
+                        ax.annotate(str(i), (_dt(p.ts), p.price), xytext=(0, 6 if p.kind == "high" else -12),
+                                    textcoords="offset points", ha="center", fontsize=8, color=TEXT)
 
-    # candles
-    width = 0.6 / (24 * 60)
-    up = w.close >= w.open
+    width = 0.6 * sc.entry_tf_minutes / (24 * 60)
+    up = (w.close >= w.open).to_numpy()
     ax.vlines(x, w.low, w.high, color=CANDLE_DOWN, linewidth=0.7, zorder=3)
     ax.bar(x[up], (w.close - w.open)[up], bottom=w.open[up], width=width, color=CANDLE_UP,
            edgecolor=CANDLE_DOWN, linewidth=0.6, zorder=4)
     ax.bar(x[~up], (w.close - w.open)[~up], bottom=w.open[~up], width=width, color=CANDLE_DOWN,
            linewidth=0, zorder=4)
 
-    # stop / target over the life of the trade
     t0, t1 = _dt(t.entry_ts), _dt(t.exit_ts)
-    t_lvl = _dt(max(t.exit_ts, t.entry_ts + 15 * MINUTE_MS))  # keep short trades' levels visible
-    ax.hlines(t.stop, t0, t_lvl, color=RED, linewidth=1.6, linestyles=(0, (4, 2)), zorder=5)
-    ax.hlines(t.take_profit, t0, t_lvl, color=BLUE, linewidth=1.6, linestyles=(0, (4, 2)), zorder=5)
+    t_lvl = _dt(max(t.exit_ts, t.entry_ts + 3 * tf))
+    ax.hlines(t.stop, _dt(sig_ts), t_lvl, color=RED, linewidth=1.6, linestyles=(0, (4, 2)), zorder=5)
+    ax.hlines(t.take_profit, _dt(sig_ts), t_lvl, color=BLUE, linewidth=1.6, linestyles=(0, (4, 2)), zorder=5)
+    # ladder rungs at signal time: filled (nearest first) solid, unfilled hollow
+    for i, price in enumerate(t.rungs):
+        filled = i < t.fills
+        ax.plot([_dt(sig_ts)], [price], marker="o", markersize=7, linestyle="none", zorder=6,
+                color=TEXT if filled else SURFACE, markeredgecolor=TEXT, markeredgewidth=1.4)
 
-    # entry / exit markers
     win = t.net_pnl > 0
     ax.plot([t0], [t.entry_price], marker="^" if t.side is Side.LONG else "v", markersize=10,
-            color=TEXT, markeredgecolor=SURFACE, markeredgewidth=2, zorder=6, linestyle="none")
+            color=TEXT, markeredgecolor=SURFACE, markeredgewidth=2, zorder=7, linestyle="none")
     ax.plot([t1], [t.exit_price], marker="o", markersize=9, color=BLUE if win else RED,
-            markeredgecolor=SURFACE, markeredgewidth=2, zorder=6, linestyle="none")
+            markeredgecolor=SURFACE, markeredgewidth=2, zorder=7, linestyle="none")
     ax.set_xlim(x[0], x[-1])
     ax.set_ylim(min(lo, t.stop, t.take_profit) - pad * 0.5, max(hi, t.stop, t.take_profit) + pad * 0.5)
     hold = (t.exit_ts - t.entry_ts) / MINUTE_MS
-    ax.set_title(f"{t.side.value} {t.symbol.replace('USDT', '')}  ·  {t.exit_reason.replace('_', ' ')} after "
-                 f"{hold:.0f} min  ·  ${t.net_pnl:+.2f} ({t.r_multiple:+.2f}R)")
-    ax.text(0.01, 0.02, t.entry_reason.split(" (R:R")[0], transform=ax.transAxes, fontsize=7.5,
-            color=TEXT_2, va="bottom")
+    hold_s = f"{hold / 60:.1f} h" if hold >= 120 else f"{hold:.0f} min"
+    fills = f", {t.fills}/{len(t.rungs)} rungs" if t.rungs else ""
+    ax.set_title(f"{t.side.value} {t.symbol.replace('USDT', '')} · {t.exit_reason.replace('_', ' ')} after "
+                 f"{hold_s}{fills} · ${t.net_pnl:+.2f} ({t.r_multiple:+.2f}R)", fontsize=9)
+    import textwrap
+    why = t.entry_reason.split(" | R:R")[0].split(" (R:R")[0]
+    ax.text(0.01, 0.02, textwrap.fill(why, 70), transform=ax.transAxes, fontsize=7, color=TEXT_2, va="bottom",
+            bbox=dict(facecolor=SURFACE, edgecolor="none", alpha=0.8, pad=1.5), zorder=8)
     ax.tick_params(labelbottom=False)
 
     ax_rsi.plot(x, rs, color=TEXT_2, linewidth=1.3)
-    ax_rsi.axhspan(cfg.strategy.rsi_overbought, 100, color=RED, alpha=0.07, linewidth=0)
-    ax_rsi.axhspan(0, cfg.strategy.rsi_oversold, color=BLUE, alpha=0.07, linewidth=0)
-    for lvl in (cfg.strategy.rsi_oversold, cfg.strategy.rsi_overbought):
+    ax_rsi.axhspan(sc.rsi_overbought, 100, color=RED, alpha=0.07, linewidth=0)
+    ax_rsi.axhspan(0, sc.rsi_oversold, color=BLUE, alpha=0.07, linewidth=0)
+    for lvl in (sc.rsi_oversold, sc.rsi_overbought):
         ax_rsi.axhline(lvl, color=MUTED, linewidth=0.8)
-    ax_rsi.axvline(t0, color=TEXT, linewidth=0.8, linestyle=(0, (2, 2)))
+    ax_rsi.axvline(_dt(sig_ts), color=TEXT, linewidth=0.8, linestyle=(0, (2, 2)))
     ax_rsi.set_ylim(0, 100)
-    ax_rsi.set_yticks([30, 70])
-    ax_rsi.set_ylabel("RSI", fontsize=8)
-    ax_rsi.xaxis.set_major_formatter(mdates.DateFormatter("%H:%M", tz=timezone.utc))
+    ax_rsi.set_yticks([sc.rsi_oversold, sc.rsi_overbought])
+    ax_rsi.set_ylabel(f"RSI {_tf_label(sc.entry_tf_minutes)}", fontsize=8)
+    fmt = "%m-%d %H:%M" if (t_last - t_first) > DAY_MS else "%H:%M"
+    ax_rsi.xaxis.set_major_formatter(mdates.DateFormatter(fmt, tz=timezone.utc))
+    ax_rsi.xaxis.set_major_locator(mdates.AutoDateLocator(maxticks=5))
     ax_rsi.set_xlim(x[0], x[-1])
 
 
 def plot_trade_gallery(cfg: Config, trades: list[Trade], path: str | Path, title: str) -> int:
-    """Draw the 3 best take-profit trades and 3 typical (~-1R) stop-outs on 1m candles."""
+    """Draw the 3 best take-profit trades and 3 typical (~-1R) stop-outs on entry-TF candles."""
     chosen = _pick_trades(trades)
     if not chosen:
         return 0
     store = HistoricalStore(cfg.data.dir)
     cols = 3
     rows = (len(chosen) + cols - 1) // cols
-    fig = plt.figure(figsize=(16, 5.2 * rows), constrained_layout=True)
+    fig = plt.figure(figsize=(18, 5.6 * rows), constrained_layout=True)
     outer = fig.add_gridspec(rows, cols)
     for i, t in enumerate(chosen):
         inner = outer[i // cols, i % cols].subgridspec(2, 1, height_ratios=[3, 1], hspace=0.05)
         ax = fig.add_subplot(inner[0])
         ax_rsi = fig.add_subplot(inner[1], sharex=ax)
         _draw_trade(cfg, store, t, ax, ax_rsi)
+    st = _tf_label(cfg.strategy.structure_tf_minutes)
     legend = [
-        Line2D([], [], marker="^", color=TEXT, linestyle="none", markersize=8, label="entry (▲ long / ▼ short)"),
+        Line2D([], [], marker="^", color=TEXT, linestyle="none", markersize=8, label="first fill (▲ long / ▼ short)"),
+        Line2D([], [], marker="o", color=TEXT, linestyle="none", markersize=7, label="ladder rung filled"),
+        Line2D([], [], marker="o", color=SURFACE, markeredgecolor=TEXT, linestyle="none", markersize=7,
+               label="ladder rung not filled"),
         Line2D([], [], marker="o", color=BLUE, linestyle="none", markersize=8, label="exit in profit"),
         Line2D([], [], marker="o", color=RED, linestyle="none", markersize=8, label="exit at a loss"),
         Line2D([], [], color=BLUE, linestyle=(0, (4, 2)), linewidth=1.6, label="take profit"),
         Line2D([], [], color=RED, linestyle=(0, (4, 2)), linewidth=1.6, label="stop loss"),
-        Line2D([], [], color=VIOLET, linewidth=2, label="trendline (5m)"),
-        Patch(color=ZONE, label="support / resistance zone (5m)"),
+        Line2D([], [], color=VIOLET, linewidth=2, label=f"trendline ({st})"),
+        Line2D([], [], color=AQUA, linewidth=1.6, label=f"channel ({st})"),
+        Line2D([], [], color=ORANGE, linewidth=1.2, marker="o", markersize=4, label=f"Elliott 0-5 ({st})"),
+        Patch(color=ZONE, label=f"S/R zone ({st})"),
     ]
     fig.suptitle(title, x=0.01, ha="left", fontsize=13, fontweight="bold")
-    fig.legend(handles=legend, loc="outside lower center", ncol=7, fontsize=9)
-    fig.savefig(path, dpi=110)
+    fig.legend(handles=legend, loc="outside lower center", ncol=6, fontsize=9)
+    fig.savefig(path, dpi=105)
     plt.close(fig)
     return len(chosen)
-

@@ -20,6 +20,13 @@ log = logging.getLogger(__name__)
 COLUMNS = ("open_time", "open", "high", "low", "close", "volume", "quote_volume")
 
 
+def warmup_days(cfg: Config) -> int:
+    """Days of history needed before trading: structure-TF history (+1 day for the 24h scanner)."""
+    import math
+    struct_days = cfg.strategy.structure_history_bars * cfg.strategy.structure_tf_minutes / 1440
+    return max(1, math.ceil(struct_days)) + 1
+
+
 def day_start_ms(d: date) -> int:
     return int(np.datetime64(d.isoformat(), "ms").astype(np.int64))
 
@@ -59,8 +66,9 @@ class MarketHistory:
 
 
 def load_history(cfg: Config, start: date, end: date, symbols: list[str],
-                 warmup_days: int = 1) -> MarketHistory:
-    """Load cached bars for [start - warmup_days, end] and funding events for [start, end]."""
+                 warmup: int | None = None) -> MarketHistory:
+    """Load cached bars for [start - warm-up days, end] and funding events for [start, end]."""
+    warmup_days_n = warmup if warmup is not None else warmup_days(cfg)
     store = HistoricalStore(cfg.data.dir)
     trade_start_ts = day_start_ms(start)
     end_ts = day_start_ms(end + timedelta(days=1))
@@ -68,7 +76,7 @@ def load_history(cfg: Config, start: date, end: date, symbols: list[str],
     funding: dict[str, dict[int, float]] = {}
     source: dict[str, str] = {}
     for sym in symbols:
-        df = store.load_klines(sym, start - timedelta(days=warmup_days), end)
+        df = store.load_klines(sym, start - timedelta(days=warmup_days_n), end)
         if df.empty:
             log.warning("no data for %s — skipped (run `autotr download` first)", sym)
             continue

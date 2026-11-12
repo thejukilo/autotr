@@ -11,8 +11,8 @@ from pathlib import Path
 from autotr.models import EquityPoint, Side, Trade
 
 TRADE_FIELDS = ["symbol", "side", "qty", "entry_price", "stop", "take_profit", "exit_price", "entry_time", "exit_time",
-                "gross_pnl", "fees", "funding", "net_pnl", "r_multiple", "risk_usd", "exit_reason",
-                "entry_reason"]
+                "gross_pnl", "fees", "funding", "net_pnl", "r_multiple", "risk_usd", "fills", "ladder", "signal_time",
+                "exit_reason", "entry_reason"]
 
 
 def iso(ts_ms: int) -> str:
@@ -26,7 +26,9 @@ def trade_row(t: Trade) -> dict:
         "exit_price": t.exit_price, "entry_time": iso(t.entry_ts), "exit_time": iso(t.exit_ts),
         "gross_pnl": round(t.gross_pnl, 6), "fees": round(t.fees, 6), "funding": round(t.funding, 6),
         "net_pnl": round(t.net_pnl, 6), "r_multiple": round(t.r_multiple, 3),
-        "risk_usd": round(t.risk_usd, 4), "exit_reason": t.exit_reason, "entry_reason": t.entry_reason,
+        "risk_usd": round(t.risk_usd, 4), "fills": t.fills,
+        "ladder": ";".join(f"{p:.8g}" for p in t.rungs), "signal_time": iso(t.signal_ts) if t.signal_ts else "",
+        "exit_reason": t.exit_reason, "entry_reason": t.entry_reason,
     }
 
 
@@ -52,7 +54,8 @@ class LiveStore:
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 symbol TEXT, side TEXT, qty REAL, entry_price REAL, exit_price REAL,
                 entry_ts INTEGER, exit_ts INTEGER, gross_pnl REAL, fees REAL, funding REAL,
-                exit_reason TEXT, risk_usd REAL, entry_reason TEXT
+                exit_reason TEXT, risk_usd REAL, entry_reason TEXT,
+                stop REAL, take_profit REAL, fills INTEGER
             );
             CREATE TABLE IF NOT EXISTS equity (
                 ts INTEGER PRIMARY KEY, equity REAL, balance REAL, open_positions INTEGER
@@ -60,21 +63,29 @@ class LiveStore:
             CREATE TABLE IF NOT EXISTS state (key TEXT PRIMARY KEY, value TEXT);
             """
         )
+        # databases created by older versions lack these columns
+        cols = {r[1] for r in self.db.execute("PRAGMA table_info(trades)")}
+        for name, typ in (("stop", "REAL"), ("take_profit", "REAL"), ("fills", "INTEGER")):
+            if name not in cols:
+                self.db.execute(f"ALTER TABLE trades ADD COLUMN {name} {typ}")
         self.db.commit()
 
     def add_trade(self, t: Trade) -> None:
         self.db.execute(
             "INSERT INTO trades (symbol, side, qty, entry_price, exit_price, entry_ts, exit_ts, gross_pnl,"
-            " fees, funding, exit_reason, risk_usd, entry_reason) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            " fees, funding, exit_reason, risk_usd, entry_reason, stop, take_profit, fills)"
+            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (t.symbol, t.side.value, t.qty, t.entry_price, t.exit_price, t.entry_ts, t.exit_ts,
-             t.gross_pnl, t.fees, t.funding, t.exit_reason, t.risk_usd, t.entry_reason),
+             t.gross_pnl, t.fees, t.funding, t.exit_reason, t.risk_usd, t.entry_reason,
+             t.stop, t.take_profit, t.fills),
         )
         self.db.commit()
 
     def trades(self) -> list[Trade]:
         rows = self.db.execute(
             "SELECT symbol, side, qty, entry_price, exit_price, entry_ts, exit_ts, gross_pnl, fees, funding,"
-            " exit_reason, risk_usd, entry_reason FROM trades ORDER BY id").fetchall()
+            " exit_reason, risk_usd, entry_reason, COALESCE(stop, 0), COALESCE(take_profit, 0),"
+            " COALESCE(fills, 1) FROM trades ORDER BY id").fetchall()
         return [Trade(r[0], Side(r[1]), *r[2:]) for r in rows]
 
     def add_equity(self, p: EquityPoint) -> None:

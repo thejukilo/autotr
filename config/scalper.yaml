@@ -1,0 +1,13 @@
+# The original 1m RSI-bounce scalper (lost money in backtests; kept for comparison).
+# uv run autotr backtest --config config/scalper.yaml
+scanner:
+  rank_by: volatility
+strategy:
+  name: scalper
+  entry_tf_minutes: 1
+  structure_tf_minutes: 5
+  structure_history_bars: 288
+  min_reward_risk_after_fees: 1.2
+  max_stop_pct: 0.03
+  time_stop_minutes: 30
+  cooldown_minutes: 5

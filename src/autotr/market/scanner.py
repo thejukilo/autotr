@@ -17,6 +17,7 @@ class ScanRow:
     symbol: str
     volatility: float      # mean 5m true range / price
     quote_volume_24h: float
+    change_24h: float = 0.0  # fractional 24h price change
 
 
 class Scanner:
@@ -30,11 +31,12 @@ class Scanner:
         return self.last_scan_ts is None or ts - self.last_scan_ts >= self.cfg.rescan_minutes * MINUTE_MS
 
     def scan(self, states: dict[str, SymbolState], ts: int,
-             volume_24h: dict[str, float] | None = None) -> list[ScanRow]:
-        """Rank symbols by volatility among those with enough 24h quote volume.
+             volume_24h: dict[str, float] | None = None,
+             change_24h: dict[str, float] | None = None) -> list[ScanRow]:
+        """Rank symbols (by |24h change| or by 5m volatility) among those with enough 24h volume.
 
-        `volume_24h` (live: from the exchange's 24h ticker) overrides the rolling volume computed
-        from bars, which needs a full day of history (backtest warm-up).
+        `volume_24h` / `change_24h` (live: from the exchange's 24h ticker) override the rolling
+        values computed from bars, which need a full day of history (backtest warm-up).
         """
         rows: list[ScanRow] = []
         for sym, st in states.items():
@@ -43,14 +45,19 @@ class Scanner:
                 continue
             if volume_24h is not None:
                 qv = volume_24h.get(sym, 0.0)
+                chg = (change_24h or {}).get(sym, st.change_24h or 0.0)
             elif st.has_24h_history:
                 qv = st.quote_volume_24h
+                chg = st.change_24h or 0.0
             else:
                 continue
             if qv < self.cfg.min_quote_volume_24h:
                 continue
-            rows.append(ScanRow(sym, vol, qv))
-        rows.sort(key=lambda r: r.volatility, reverse=True)
+            rows.append(ScanRow(sym, vol, qv, chg))
+        if self.cfg.rank_by == "change_24h":
+            rows.sort(key=lambda r: abs(r.change_24h), reverse=True)
+        else:
+            rows.sort(key=lambda r: r.volatility, reverse=True)
         top = rows[: self.cfg.top_n]
         new_active = {r.symbol for r in top}
         if new_active != self.active:

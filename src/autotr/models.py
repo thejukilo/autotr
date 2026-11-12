@@ -46,6 +46,8 @@ class Signal:
     stop: float
     take_profit: float
     reason: str
+    # Optional limit-order ladder: [(price, weight), ...] nearest rung first; weights sum to 1.
+    ladder: list[tuple[float, float]] | None = None
 
 
 @dataclass(slots=True)
@@ -65,6 +67,9 @@ class Trade:
     entry_reason: str = ""
     stop: float = 0.0
     take_profit: float = 0.0
+    fills: int = 1           # ladder rungs filled
+    signal_ts: int = 0       # when the strategy signalled (entry_ts is the first fill)
+    rungs: tuple[float, ...] = ()  # planned limit prices, nearest first (empty = market entry)
 
     @property
     def net_pnl(self) -> float:

@@ -46,6 +46,7 @@ class LiveEngine:
         self.core = TradingCore(cfg, filters)
         self.ex = self.core.exchange
         self.volumes: dict[str, float] | None = None
+        self.changes: dict[str, float] | None = None
         self.last_minute: int | None = None
         self.last_seen: dict[str, int] = {}
         self._next_equity = 0
@@ -115,12 +116,13 @@ class LiveEngine:
             if amount:
                 log.info("FUNDING %s rate %.4f%% -> $%+.4f", ev.symbol, ev.rate * 100, amount)
         elif isinstance(ev, WarmupBars):
-            for bar in ev.bars:
-                if bar.open_time > self.last_seen.get(bar.symbol, -1):
-                    self.last_seen[bar.symbol] = bar.open_time
-                    self.core.warmup_bar(bar)
+            for bar in ev.bars:  # SymbolState drops bars it already has, per timeframe
+                self.core.warmup_bar(bar)
+                if bar.interval_ms == MINUTE_MS:
+                    self.last_seen[bar.symbol] = max(self.last_seen.get(bar.symbol, -1), bar.open_time)
         elif isinstance(ev, Volumes24h):
             self.volumes = ev.quote_volume
+            self.changes = ev.change
 
     def _on_kline(self, ev: KlineClosed) -> None:
         bar = ev.bar
@@ -144,7 +146,7 @@ class LiveEngine:
 
     def _on_new_minute(self, ts: int) -> None:
         """Runs once per minute, before processing the first candle of the new minute."""
-        if self.core.maybe_rescan(ts, self.volumes):
+        if self.core.maybe_rescan(ts, self.volumes, self.changes):
             act = sorted(self.core.scanner.active)
             log.debug("watching %s", ", ".join(act))
         if ts >= self._next_save:
@@ -158,8 +160,8 @@ class LiveEngine:
             self._next_status = ts + STATUS_EVERY_MS
             rows = {r.symbol: r for r in self.core.scanner.last_rows}
             ranked = sorted((rows[s] for s in self.core.scanner.active if s in rows),
-                            key=lambda r: -r.volatility)
-            active = ", ".join(f"{r.symbol}({r.volatility:.2%})" for r in ranked)
+                            key=lambda r: -abs(r.change_24h))
+            active = ", ".join(f"{r.symbol}({r.change_24h:+.1%})" for r in ranked)
             pos = ", ".join(f"{p.side.value} {s} {p.unrealized(self.ex.last_price.get(s, p.entry_price)):+.2f}"
                             for s, p in self.ex.positions.items()) or "none"
             halted = " [DAILY LOSS LIMIT — paused until 00:00 UTC]" if self.core.risk.state.halted else ""

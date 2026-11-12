@@ -34,21 +34,33 @@ class BinanceRest:
     async def exchange_info(self) -> dict:
         return await self._get("/fapi/v1/exchangeInfo")
 
-    async def ticker_24h(self) -> dict[str, float]:
-        """24h quote volume per symbol."""
+    async def ticker_24h(self) -> tuple[dict[str, float], dict[str, float]]:
+        """(24h quote volume, 24h fractional price change) per symbol."""
         data = await self._get("/fapi/v1/ticker/24hr")
-        return {d["symbol"]: float(d["quoteVolume"]) for d in data}
+        vol = {d["symbol"]: float(d["quoteVolume"]) for d in data}
+        chg = {d["symbol"]: float(d.get("priceChangePercent", 0.0)) / 100 for d in data}
+        return vol, chg
 
-    async def klines(self, symbol: str, limit: int = 1500, start_time: int | None = None) -> list[Bar]:
-        """Closed 1m bars (the still-forming last bar is dropped)."""
-        params: dict = {"symbol": symbol, "interval": "1m", "limit": min(limit, 1500)}
+    async def klines(self, symbol: str, limit: int = 1500, start_time: int | None = None,
+                     interval_minutes: int = 1) -> list[Bar]:
+        """Closed bars of the given interval (the still-forming last bar is dropped)."""
+        params: dict = {"symbol": symbol, "interval": interval_str(interval_minutes), "limit": min(limit, 1500)}
         if start_time is not None:
             params["startTime"] = start_time
         rows = await self._get("/fapi/v1/klines", **params)
         now_ms = int(time.time() * 1000)
+        ims = interval_minutes * 60_000
         return [Bar(symbol, int(r[0]), float(r[1]), float(r[2]), float(r[3]), float(r[4]),
-                    float(r[5]), float(r[7]))
+                    float(r[5]), float(r[7]), ims)
                 for r in rows if int(r[6]) < now_ms]  # r[6] = close time; drop the forming bar
+
+
+def interval_str(minutes: int) -> str:
+    if minutes % 1440 == 0:
+        return f"{minutes // 1440}d"
+    if minutes % 60 == 0:
+        return f"{minutes // 60}h"
+    return f"{minutes}m"
 
 
 def usdt_perpetuals(info: dict) -> list[str]:

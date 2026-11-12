@@ -45,9 +45,10 @@ class BinanceFeed:
 
     # ------------------------------------------------------------ setup
     async def _pick_candidates(self) -> tuple[list[str], dict[str, float]]:
+        """Top-N USDT perpetuals by 24h quote volume (+ symbols that must stay watched)."""
         info = await self.rest.exchange_info()
         perps = set(usdt_perpetuals(info))
-        vols = await self.rest.ticker_24h()
+        vols, _ = await self.rest.ticker_24h()
         ranked = sorted((s for s in perps if s in vols), key=lambda s: vols[s], reverse=True)
         chosen = ranked[: self.cfg.universe.live_candidates]
         for s in self.must_watch():
@@ -58,20 +59,36 @@ class BinanceFeed:
     async def _warmup(self, symbols: list[str]) -> AsyncIterator[Event]:
         sem = asyncio.Semaphore(5)
 
+        sc = self.cfg.strategy
+        struct_ms = sc.structure_tf_minutes * MINUTE_MS
+
         async def fetch(sym: str) -> list[Bar]:
+            # structure-TF history, entry-TF history, then 1m bars of the current structure bar
             async with sem:
-                return await self.rest.klines(sym, self.cfg.live.warmup_bars)
+                bars: list[Bar] = []
+                if sc.structure_tf_minutes > 1:
+                    bars += await self.rest.klines(sym, sc.structure_history_bars + 10,
+                                                   interval_minutes=sc.structure_tf_minutes)
+                if sc.entry_tf_minutes > 1:
+                    bars += await self.rest.klines(sym, 500, interval_minutes=sc.entry_tf_minutes)
+                if 5 not in (sc.structure_tf_minutes, sc.entry_tf_minutes):
+                    bars += await self.rest.klines(sym, 100, interval_minutes=5)  # scanner volatility
+                start = now_ms() - now_ms() % struct_ms
+                ones = await self.rest.klines(sym, 1500, start_time=start if sc.entry_tf_minutes > 1 else None)
+                return bars + ones
 
         new = [s for s in symbols if s not in self.last_open]
         if not new:
             return
-        log.info("warming up %d symbols with %d 1m bars each", len(new), self.cfg.live.warmup_bars)
+        log.info("warming up %d symbols (%s structure + %s entry history)", len(new),
+                 f"{sc.structure_history_bars}x{sc.structure_tf_minutes}m", f"{sc.entry_tf_minutes}m")
         results = await asyncio.gather(*(fetch(s) for s in new), return_exceptions=True)
         for sym, bars in zip(new, results):
             if isinstance(bars, Exception) or not bars:
                 log.warning("warm-up failed for %s: %s", sym, bars)
                 continue
-            self.last_open[sym] = bars[-1].open_time
+            ones = [b for b in bars if b.interval_ms == MINUTE_MS]
+            self.last_open[sym] = ones[-1].open_time if ones else now_ms() - now_ms() % MINUTE_MS - MINUTE_MS
             yield WarmupBars(bars)
 
     async def _backfill(self) -> AsyncIterator[Event]:
@@ -142,8 +159,8 @@ class BinanceFeed:
         stale_s = self.cfg.live.stream_timeout_s
         while True:
             try:
-                self._symbols, vols = await self._pick_candidates()
-                yield Volumes24h(vols)
+                self._symbols, _ = await self._pick_candidates()
+                yield Volumes24h(*await self.rest.ticker_24h())
                 async for ev in self._warmup(self._symbols):
                     yield ev
                 async for ev in self._backfill():
@@ -172,7 +189,7 @@ class BinanceFeed:
                         if time.monotonic() >= next_vol:
                             next_vol = time.monotonic() + vol_every_s
                             try:
-                                yield Volumes24h(await self.rest.ticker_24h())
+                                yield Volumes24h(*await self.rest.ticker_24h())
                             except Exception as exc:  # noqa: BLE001
                                 log.warning("24h ticker refresh failed: %s", exc)
                 log.info("refreshing watch list / reconnecting")

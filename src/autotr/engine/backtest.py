@@ -30,10 +30,10 @@ class BacktestResult:
 
 
 def run_backtest(cfg: Config, start: date, end: date, symbols: list[str] | None = None,
-                 warmup_days: int = 1, progress: bool = True,
+                 warmup_days: int | None = None, progress: bool = True,
                  history: MarketHistory | None = None) -> BacktestResult:
-    """Run over [start, end] (inclusive UTC days). `warmup_days` before `start` feed indicators
-    and the scanner's 24h volume without trading."""
+    """Run over [start, end] (inclusive UTC days). Warm-up days before `start` (default: enough
+    for the structure timeframe) feed indicators and the scanner without trading."""
     h = history or load_history(cfg, start, end, symbols or cfg.universe.symbols, warmup_days)
     core = TradingCore(cfg, FilterBook.load(cfg.data.dir))
     ex = core.exchange
