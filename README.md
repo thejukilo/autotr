@@ -13,8 +13,9 @@ money is used.**
   minimum-notional rules
 - The same strategy code runs in **backtests**, **historical replays** and **live paper trading**
 
-> ⚠️ This is an experiment, not financial advice. The first backtests are **unprofitable** (see
-> [Current results](#current-results)). Don't trade real money with it.
+> ⚠️ This is an experiment, not financial advice. The original strategies are **unprofitable**; a
+> strategy search found one small, not-yet-confirmed edge (see [Current results](#current-results)).
+> Don't trade real money with it.
 
 ## Setup (on your own computer)
 
@@ -52,6 +53,27 @@ uv run autotr live --reset    # throw away the paper account and start again wit
 ```
 
 Add `-v` to `backtest` or `live` for debug logs (every signal, scanner changes).
+
+### Strategy research
+
+```bash
+# Download the full research history (Jul 2025 → Nov 2026, ~1 GB for 34 coins)
+uv run autotr download --end 2026-11-10 --days 498
+
+# Evaluate a strategy on the fixed research + validation windows (holdout only for final candidates)
+uv run autotr research-eval --config config/research/xs_mom_trail_a.yaml
+uv run autotr research-eval --config config/research/xs_mom_trail_a.yaml --holdout
+
+# Grid-search the confluence strategy with a train/test split
+uv run autotr optimize --grid confluence --train-start 2026-07-26 --train-end 2026-09-30 \
+    --test-start 2026-10-01 --test-end 2026-11-10
+```
+
+Research strategies live in `src/autotr/strategy/research/<name>.py` (a `Strategy` class with
+`on_bar`, plus optional `observe` to see every coin and `manage` to trail the stop) and are selected
+with `strategy.name` in a config under `config/research/`. Progress of every backtest window is
+appended to `reports/research/progress.log`. The full research log is in
+[docs/RESEARCH_LOG.md](docs/RESEARCH_LOG.md).
 
 ### Configuration
 
@@ -123,8 +145,56 @@ contributes. The original 1m scalper is still available: `--config config/scalpe
 
 ## Current results
 
+### Strategy search (Nov 2026)
+
+Fifteen strategies were generated and tested by a creator agent and tester agents, on 34 coins with
+realistic fees, using separate data windows so that ideas are not tuned on the data they are judged on:
+
+| Window | Use | Period |
+|---|---|---|
+| R1, R2 | research: strategies are designed and diagnosed on these | Aug–Oct 2025, Jan–Mar 2026 |
+| V1, V2 | validation: accept / reject only | Nov–Dec 2025, Apr–Jun 2026 |
+| H1, H2 | holdout: locked until the final candidate | Jul–Sep 2026, Sep–Nov 2026 |
+
+Research strategies risk 1% per trade with up to 4 positions. Profit factor (PF) = gross wins / gross losses.
+
+| Strategy | R1 | R2 | V1 | V2 | Verdict |
+|---|---|---|---|---|---|
+| **xs_mom_trail_a**: 4h cross-sectional momentum + trailing stop | **+6.4%** PF 1.21 | **+10.0%** PF 1.28 | **+3.7%** PF 1.23 | **+6.0%** PF 1.19 | **candidate** (robustness + holdout checks running) |
+| xs_momentum: same entries, fixed 3R target | +4.2% PF 1.08 | +6.5% PF 1.11 | −3.8% PF 0.89 | +0.7% PF 1.02 | marginal |
+| donchian_trail: 4h breakout + trailing stop | +0.9% | −2.9% | −10.3% | +0.6% | break-even |
+| donchian_trend: 1h breakout, 2.5R | −9.8% | +17.9% | −30.7% | −27.4% | dead |
+| bb_reversion: 1h Bollinger fade (ADX < 22) | −9.0% | −10.2% | +17.3% | +22.1% | regime-dependent |
+| bb_reversion_v2: re-entry, wider stop | −16.0% | −49.7% | +3.4% | +15.1% | dead |
+| exhaustion_fade: 24h mover reversal | −3.0% | −7.2% | +1.3% | +7.1% | marginal |
+| squeeze_breakout: 1h Bollinger squeeze | −18.6% | −35.6% | −38.9% | −31.1% | dead |
+| trend_pullback: 4h trend, 15m RSI dip | −89.3% | −82.8% | −58.8% | −72.5% | dead |
+
+**xs_mom_trail_a** ranks all coins every 4 hours by their 7-day return, goes long the 3 strongest
+(if above their 50-bar EMA) and short the 3 weakest (if below), with a 3 ATR stop that trails
+3 ATR behind the best close and no fixed target. It trades about once a day.
+
+Conclusions so far:
+- **Low-timeframe trading is killed by fees.** Strategies on 1m–15m entries trade 5–13 times a day
+  and lose 60–90% even when they are roughly break-even before fees.
+- **Short holds lose, long holds win.** Across every strategy, trades closed within a few hours
+  lost money and trades held 12–48h made money: tight stops get hit by noise before the idea plays out.
+- **Fading big moves doesn't work reliably** (scalper, confluence, exhaustion fade, Bollinger fade):
+  it only paid off in the choppier validation windows.
+- **Relative-strength momentum is the only idea with an edge in every window**, and only once
+  winners were allowed to run with a trailing stop. The edge is small (≈ +0.08R per trade), so it
+  still has to survive parameter-robustness checks, higher fees and the locked holdout windows.
+- Caveats: all four research/validation windows are bear markets (median coin −18% to −37%); the
+  coin list is today's (survivorship bias); results are simulations.
+
+### Original strategies
+
 All backtests below use 34 coins, $100 start, 5x leverage, 2% risk, realistic fees. **None is
-profitable yet.**
+profitable.**
+
+**Confluence grid search** (`autotr optimize --grid confluence`): best of 24 settings on
+Jul 26 – Sep 30 (15m entries, score ≥ 4, 60/40 ladder, wait for the level to hold) made +3.2% in
+training but **−26.3% on the unseen Oct 1 – Nov 10** test (default settings: −55.4%).
 
 **Ablation, 2026-07-26 → 2026-11-10 (108 days)** — `reports/ablation/ablation.txt`:
 
@@ -151,11 +221,14 @@ What the data says:
 
 ```
 config/default.yaml      all settings
+config/research/         configs of the research strategies (+ robust/ variations)
 src/autotr/
   data/                  historical downloader, Binance REST + WebSocket feed, replay
   indicators/            RSI, ATR, pivots, S/R zones, trendlines, channels, Elliott waves
   market/                1m→5m aggregation, per-symbol feature state, volatility scanner
   strategy/              confluence strategy (manual method) and the old scalper
+  strategy/research/     strategies from the automated strategy search
+  research.py            fixed research / validation / holdout windows and diagnostics
   risk/                  position sizing and account guards
   sim/                   paper exchange and symbol filters
   engine/                shared core, backtest engine, live engine

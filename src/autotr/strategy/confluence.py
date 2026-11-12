@@ -16,6 +16,9 @@ On every closed entry-timeframe bar (5m) of a coin picked by the scanner (high v
    wave-5 extreme), falling back to the nearest strong zone / swing pivot, plus a buffer.
 5. **Target** at the first opposing S/R zone (or channel boundary / wave-4 area) that gives at
    least `min_reward_risk_after_fees`; otherwise no trade.
+
+Optional `confirm_hold`: only enter once an entry bar closes in the trade direction and back on the
+right side of the level (the level held), instead of buying into the move.
 """
 
 from __future__ import annotations
@@ -182,6 +185,14 @@ class ConfluenceStrategy:
                 return Signal(st.symbol, su.side, now, price, stop, tp, reason, ladder)
         return None
 
+    @staticmethod
+    def _held(su: Setup, bar) -> bool:
+        """The level held: the entry bar closed in the trade direction and back beyond the level."""
+        if su.anchor is None:
+            return False
+        s = su.side.sign
+        return s * (bar.close - bar.open) > 0 and s * (bar.close - su.anchor) > 0
+
     # ------------------------------------------------------------------ main
     def on_bar(self, st: SymbolState) -> Signal | None:
         c = self.cfg
@@ -205,6 +216,8 @@ class ConfluenceStrategy:
         for side in sides:
             su = self._score(side, st, ctx, price, now)
             if su.score < c.min_score or su.score <= best_score:
+                continue
+            if c.confirm_hold and not self._held(su, bar):
                 continue
             sig = self._plan(su, st, ctx, price, now)
             if sig is not None:

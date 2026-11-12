@@ -256,6 +256,7 @@ def optimize(
     symbols: Optional[str] = typer.Option(None, help="Comma-separated symbols (default: config universe)"),
     workers: Optional[int] = typer.Option(None, help="Parallel backtests (default: CPU count)"),
     out: Path = typer.Option(Path("reports/optimize"), help="Output directory"),
+    grid: str = typer.Option("", help="Settings grid: confluence | scalper (default: the configured strategy)"),
     config: Optional[Path] = ConfigOpt,
 ) -> None:
     """Grid-search settings on the training period; evaluate the best once on the test period."""
@@ -265,7 +266,7 @@ def optimize(
     import yaml
 
     from autotr.engine.backtest import run_backtest
-    from autotr.optimize import DEFAULT_GRID, apply_params, describe, evaluate, run_grid, score
+    from autotr.optimize import GRIDS, apply_params, describe, evaluate, run_grid, score
     from autotr.data.replay import load_history
     from autotr.report.metrics import compute_metrics
     from autotr.report.visualize import plot_dashboard, plot_trade_gallery
@@ -273,6 +274,10 @@ def optimize(
     _setup_logging(False)
     logging.getLogger("autotr").setLevel(logging.WARNING)
     cfg = load_config(config)
+    grid_name = grid or cfg.strategy.name
+    if grid_name not in GRIDS:
+        raise typer.BadParameter(f"unknown grid {grid_name!r}; choose from {', '.join(GRIDS)}")
+    DEFAULT_GRID = GRIDS[grid_name]
     tr0, tr1, te0, te1 = map(_parse_date, (train_start, train_end, test_start, test_end))
     if te0 <= tr1:
         raise typer.BadParameter("the test period must start after the training period")
@@ -300,7 +305,7 @@ def optimize(
                    f"{m['trades']:4d} trades  PF {m['profit_factor']:4.2f}  | {describe(r.params)}"
                    f"   (best so far {b['return_pct']:+.1f}%)")
 
-    results = run_grid(cfg, tr0, tr1, syms, workers=workers, on_result=progress)
+    results = run_grid(cfg, tr0, tr1, syms, grid=DEFAULT_GRID, workers=workers, on_result=progress)
     results.sort(key=lambda r: score(r, min_trades), reverse=True)
 
     with open(out / "grid_train.csv", "w", newline="") as fh:
@@ -401,6 +406,31 @@ def ablation(
     typer.echo("\n" + "\n".join(lines))
     (out / "ablation.txt").write_text("\n".join(lines) + "\n")
     typer.echo(f"\nSaved {out}/ablation.txt")
+
+
+@app.command("research-eval")
+def research_eval(
+    config: Path = typer.Option(..., "--config", help="Strategy config (YAML)"),
+    out: Optional[Path] = typer.Option(None, help="Output dir (default: reports/research/<config stem>)"),
+    holdout: bool = typer.Option(False, help="Also run the locked holdout windows (final candidates only)"),
+    only_holdout: bool = typer.Option(False, help="Run only the holdout windows"),
+    workers: int = typer.Option(4, help="Windows evaluated in parallel"),
+) -> None:
+    """Evaluate a strategy config on the fixed research / validation (/ holdout) windows."""
+    import time
+
+    from autotr.research import evaluate_windows, save, select_windows, summary_table
+
+    _setup_logging(False)
+    logging.getLogger("autotr").setLevel(logging.ERROR)
+    cfg = load_config(config)
+    kinds = {"holdout"} if only_holdout else {"research", "validation"} | ({"holdout"} if holdout else set())
+    out = out or Path("reports/research") / config.stem
+    t0 = time.time()
+    results = evaluate_windows(cfg, select_windows(kinds), out, workers)
+    save(out, config.stem, str(config), results)
+    typer.echo(summary_table(f"{config.stem}  ({time.time() - t0:.0f}s)", results))
+    typer.echo(f"Saved {out}/results.json, summary.txt, trades_R*.csv")
 
 
 if __name__ == "__main__":

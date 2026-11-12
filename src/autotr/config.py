@@ -89,6 +89,9 @@ class StrategyCfg(BaseModel):
     use_trendlines: bool = True
     use_elliott: bool = True
     use_ladder: bool = True
+    entry_history_bars: int = 10     # entry-TF bars kept in SymbolState.bars_e (research strategies may need more)
+    params: dict[str, Any] = {}      # free-form parameters for research strategies (strategy/research/<name>.py)
+    confirm_hold: bool = False       # require a 5m candle closing back on the right side of the level
     strong_zone_touches: int = 3
     channel_lookback_pivots: int = 12
     elliott_strict_overlap: bool = True

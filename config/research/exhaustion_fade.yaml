@@ -1,0 +1,17 @@
+# Batch 1: 24h mover (>8%) with 1h RSI ≥78, reversal bar → fade to EMA20 (the manual method, slower)
+scanner:
+  rank_by: volatility
+  top_n: 34
+  min_quote_volume_24h: 20000000
+risk:
+  risk_per_trade: 0.01
+  max_positions: 4
+  max_trades_per_day: 20
+strategy:
+  name: exhaustion_fade
+  entry_tf_minutes: 60
+  structure_tf_minutes: 60
+  structure_history_bars: 200
+  time_stop_minutes: 1440
+  cooldown_minutes: 240
+  params: {min_move: 0.08, rsi_ext: 78, ema: 20, stop_buf: 0.002, min_rr: 1.2}

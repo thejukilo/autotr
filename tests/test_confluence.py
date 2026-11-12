@@ -110,3 +110,18 @@ def test_short_mirror_at_resistance():
     prices = [p for p, _ in sig.ladder]
     assert prices[0] < prices[1] < prices[2] and prices[2] == pytest.approx(100.1)
     assert sig.stop > 100.4 and sig.take_profit == pytest.approx(96.8 + 0.02)
+
+
+def test_confirm_hold_requires_bullish_close_beyond_level():
+    from autotr.strategy.confluence import Setup
+
+    su = Setup(Side.LONG, anchor=99.9)
+    green_above = Bar("X", 0, 99.8, 100.3, 99.7, 100.2, 1, 1, M5)
+    red_above = Bar("X", 0, 100.4, 100.5, 99.7, 100.2, 1, 1, M5)
+    green_below = Bar("X", 0, 99.5, 99.9, 99.4, 99.8, 1, 1, M5)
+    assert ConfluenceStrategy._held(su, green_above)
+    assert not ConfluenceStrategy._held(su, red_above)
+    assert not ConfluenceStrategy._held(su, green_below)
+    assert not ConfluenceStrategy._held(Setup(Side.LONG), green_above)   # no level, nothing to hold
+    short = Setup(Side.SHORT, anchor=100.5)
+    assert ConfluenceStrategy._held(short, Bar("X", 0, 100.4, 100.6, 100.0, 100.1, 1, 1, M5))

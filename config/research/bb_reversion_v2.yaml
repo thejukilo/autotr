@@ -1,0 +1,17 @@
+# Round 2: BB re-entry (wait for close back inside), wider stop, efficiency-ratio chop filter
+scanner:
+  rank_by: volatility
+  top_n: 34
+  min_quote_volume_24h: 20000000
+risk:
+  risk_per_trade: 0.01
+  max_positions: 4
+  max_trades_per_day: 20
+strategy:
+  name: bb_reversion_v2
+  entry_tf_minutes: 60
+  structure_tf_minutes: 60
+  structure_history_bars: 200
+  time_stop_minutes: 1440
+  cooldown_minutes: 180
+  params: {bb_n: 20, bb_k: 2.5, rsi_lo: 30, rsi_hi: 70, er_n: 48, er_max: 0.3, buf_atr: 0.5, min_stop_atr: 2.0, min_rr: 0.8}

@@ -1,0 +1,17 @@
+# Batch 1: Bollinger 2.5σ fade with RSI extreme, only when 1h ADX < 22
+scanner:
+  rank_by: volatility
+  top_n: 34
+  min_quote_volume_24h: 20000000
+risk:
+  risk_per_trade: 0.01
+  max_positions: 4
+  max_trades_per_day: 20
+strategy:
+  name: bb_reversion
+  entry_tf_minutes: 60
+  structure_tf_minutes: 60
+  structure_history_bars: 200
+  time_stop_minutes: 1440
+  cooldown_minutes: 180
+  params: {bb_n: 20, bb_k: 2.5, rsi_lo: 25, rsi_hi: 75, adx_max: 22, stop_atr: 1.5}

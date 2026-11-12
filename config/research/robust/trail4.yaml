@@ -1,0 +1,17 @@
+# Robustness check of xs_mom_trail_a: trail4
+scanner:
+  rank_by: volatility
+  top_n: 34
+  min_quote_volume_24h: 20000000
+risk:
+  risk_per_trade: 0.01
+  max_positions: 4
+  max_trades_per_day: 20
+strategy:
+  name: xs_momentum_trail
+  entry_tf_minutes: 240
+  structure_tf_minutes: 240
+  structure_history_bars: 80
+  time_stop_minutes: 14400
+  cooldown_minutes: 1440
+  params: {lookback: 42, k: 3, ema: 50, stop_atr: 3.0, trail_atr: 4.0}

@@ -1,0 +1,18 @@
+# Batch 1: 4h EMA20/50 trend, 15m RSI dip below 40 and turning → join trend
+scanner:
+  rank_by: volatility
+  top_n: 34
+  min_quote_volume_24h: 20000000
+risk:
+  risk_per_trade: 0.01
+  max_positions: 4
+  max_trades_per_day: 20
+strategy:
+  name: trend_pullback
+  entry_tf_minutes: 15
+  structure_tf_minutes: 240
+  structure_history_bars: 120
+  entry_history_bars: 60
+  time_stop_minutes: 1440
+  cooldown_minutes: 120
+  params: {ema_fast: 20, ema_slow: 50, rsi_dip: 40, swing_bars: 8, stop_buf_atr: 0.3, tp_r: 2.0}

@@ -1,0 +1,17 @@
+# Round 3c: 4h Donchian-30 (5 days) breakout + EMA50 filter, 2.5 ATR stop, 3 ATR chandelier trail, no target
+scanner:
+  rank_by: volatility
+  top_n: 34
+  min_quote_volume_24h: 20000000
+risk:
+  risk_per_trade: 0.01
+  max_positions: 4
+  max_trades_per_day: 20
+strategy:
+  name: donchian_trail
+  entry_tf_minutes: 240
+  structure_tf_minutes: 240
+  structure_history_bars: 80
+  time_stop_minutes: 14400
+  cooldown_minutes: 1440
+  params: {lookback: 30, ema: 50, stop_atr: 2.5, trail_atr: 3.0}

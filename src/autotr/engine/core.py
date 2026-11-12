@@ -33,6 +33,12 @@ class TradingCore:
         self.signals: list[Signal] = []
         self.on_signal: list[Callable[[Signal, bool], None]] = []
         self.exchange.on_trade.append(self.risk.on_trade)
+        # Optional hook: strategies that keep their own per-symbol state see every entry bar of every
+        # symbol, not only the scanner's active ones.
+        self._observe = getattr(self.strategy, "observe", None)
+        # Optional hook: `manage(st, position) -> new stop | None` on each entry bar of an open position.
+        # The stop may only tighten (trailing / break-even), never widen.
+        self._manage = getattr(self.strategy, "manage", None)
 
     def state(self, symbol: str) -> SymbolState:
         st = self.states.get(symbol)
@@ -49,6 +55,15 @@ class TradingCore:
         st = self.state(bar.symbol)
         entry_closed = st.on_bar(bar)
         self.risk.update_clock(bar.close_time, self.exchange.equity())
+        if entry_closed and self._observe is not None:
+            self._observe(st)
+        if entry_closed and self._manage is not None:
+            pos = self.exchange.positions.get(bar.symbol)
+            if pos is not None:
+                new = self._manage(st, pos)
+                sgn = pos.side.sign
+                if new is not None and sgn * (new - pos.stop) > 0 and sgn * (bar.close - new) > 0:
+                    pos.stop = new
         if not entry_closed or bar.symbol not in self.scanner.active:
             return None
         sig = self.strategy.on_bar(st)

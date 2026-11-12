@@ -28,6 +28,15 @@ DEFAULT_GRID: dict[str, list[Any]] = {
     "strategy.time_stop_minutes": [30, 90],
 }
 
+# Confluence strategy: the three fixes suggested by the first ablation, plus score strictness.
+CONFLUENCE_GRID: dict[str, list[Any]] = {
+    "strategy.ladder_weights": [[0.2, 0.3, 0.5], [0.5, 0.3, 0.2], [0.6, 0.4]],
+    "strategy.confirm_hold": [False, True],
+    "strategy.entry_tf_minutes": [5, 15],
+    "strategy.min_score": [3.0, 4.0],
+}
+GRIDS = {"scalper": DEFAULT_GRID, "confluence": CONFLUENCE_GRID}
+
 _HISTORY: MarketHistory | None = None  # shared with forked workers (copy-on-write)
 _JOB: dict = {}
 
@@ -135,6 +144,14 @@ def describe(params: dict[str, Any]) -> str:
             parts.append(f"TP {v}R")
         elif name == "time_stop_minutes":
             parts.append(f"time stop {v}m")
+        elif name == "ladder_weights":
+            parts.append("ladder " + "/".join(f"{w * 100:.0f}" for w in v))
+        elif name == "confirm_hold":
+            parts.append("wait for hold" if v else "no hold check")
+        elif name == "entry_tf_minutes":
+            parts.append(f"{v}m entries")
+        elif name == "min_score":
+            parts.append(f"score ≥{v:g}")
         else:
             parts.append(f"{name}={v}")
     return ", ".join(parts)

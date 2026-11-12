@@ -64,6 +64,7 @@ strategy:
   use_trendlines: true
   use_elliott: true
   use_ladder: true
+  confirm_hold: false              # wait for the level to hold: entry bar must close back beyond it, in the trade direction
 
   # Structure detection (1h)
   atr_period: 14

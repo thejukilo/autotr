@@ -1,0 +1,17 @@
+# Batch 1: Donchian 48h breakout with EMA100 filter on 1h bars
+scanner:
+  rank_by: volatility
+  top_n: 34
+  min_quote_volume_24h: 20000000
+risk:
+  risk_per_trade: 0.01
+  max_positions: 4
+  max_trades_per_day: 20
+strategy:
+  name: donchian_trend
+  entry_tf_minutes: 60
+  structure_tf_minutes: 60
+  structure_history_bars: 200
+  time_stop_minutes: 2880
+  cooldown_minutes: 240
+  params: {lookback: 48, ema: 100, stop_atr: 2.0, tp_r: 2.5}

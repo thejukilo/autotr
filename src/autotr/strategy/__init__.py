@@ -12,4 +12,13 @@ def make_strategy(cfg: Config):
     if name == "confluence":
         from autotr.strategy.confluence import ConfluenceStrategy
         return ConfluenceStrategy(cfg.strategy, cfg.exchange)
-    raise ValueError(f"unknown strategy {name!r} (expected 'confluence' or 'scalper')")
+    # Research strategies: src/autotr/strategy/research/<name>.py defining `Strategy(cfg, fees)`.
+    import importlib
+    try:
+        mod = importlib.import_module(f"autotr.strategy.research.{name}")
+    except ModuleNotFoundError as e:
+        if e.name != f"autotr.strategy.research.{name}":
+            raise
+        raise ValueError(f"unknown strategy {name!r}: not 'confluence', 'scalper' or a module in "
+                         "src/autotr/strategy/research/") from None
+    return mod.Strategy(cfg.strategy, cfg.exchange)

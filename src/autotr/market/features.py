@@ -58,7 +58,7 @@ class SymbolState:
         self.rsi_now: float | None = None
         self.rsi_hist: deque[float] = deque(maxlen=max(cfg.rsi_lookback, 1) + 1)
         self.atr_e = ATR(cfg.atr_period)
-        self.bars_e: deque[Bar] = deque(maxlen=max(cfg.touch_lookback_bars, cfg.rsi_lookback, 10))
+        self.bars_e: deque[Bar] = deque(maxlen=max(cfg.touch_lookback_bars, cfg.rsi_lookback, cfg.entry_history_bars, 10))
         self.last_bar: Bar | None = None  # last closed entry-timeframe bar
 
         # structure timeframe

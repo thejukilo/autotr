@@ -1,0 +1,17 @@
+# Batch 1: 1h Bollinger squeeze (lowest 15% width) then band break
+scanner:
+  rank_by: volatility
+  top_n: 34
+  min_quote_volume_24h: 20000000
+risk:
+  risk_per_trade: 0.01
+  max_positions: 4
+  max_trades_per_day: 20
+strategy:
+  name: squeeze_breakout
+  entry_tf_minutes: 60
+  structure_tf_minutes: 60
+  structure_history_bars: 230
+  time_stop_minutes: 2880
+  cooldown_minutes: 240
+  params: {bb_n: 20, bb_k: 2.0, hist: 200, pct: 0.15, stop_atr: 1.5, tp_r: 2.5}
