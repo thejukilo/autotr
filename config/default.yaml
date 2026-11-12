@@ -1,0 +1,69 @@
+# autotr default configuration.
+# Copy to config/local.yaml and pass `--config config/local.yaml` to override values.
+# All prices/amounts in USDT, all times in UTC.
+
+account:
+  starting_balance: 100.0
+
+exchange:
+  taker_fee: 0.0005          # 0.05% — confirm your Binance VIP tier / BNB discount
+  maker_fee: 0.0002          # 0.02%
+  slippage_bps: 2.0          # adverse slippage on market & stop fills (1 bp = 0.01%)
+  leverage: 5                # isolated margin
+  maintenance_margin_rate: 0.01   # conservative tier-1 MMR used for liquidation price
+  default_funding_rate: 0.0001    # used when historical funding data is unavailable (per 8h)
+
+data:
+  dir: data
+  interval: 1m
+
+universe:
+  # Backtest universe (live mode discovers symbols from Binance instead).
+  symbols: [
+    BTCUSDT, ETHUSDT, SOLUSDT, XRPUSDT, DOGEUSDT, BNBUSDT, ADAUSDT, AVAXUSDT,
+    LINKUSDT, SUIUSDT, LTCUSDT, DOTUSDT, NEARUSDT, APTUSDT, ARBUSDT, OPUSDT,
+    INJUSDT, TIAUSDT, SEIUSDT, WIFUSDT, 1000PEPEUSDT, 1000BONKUSDT, ORDIUSDT,
+    FETUSDT, RENDERUSDT, WLDUSDT, TRXUSDT, BCHUSDT, FILUSDT, ATOMUSDT, ENAUSDT,
+    TAOUSDT, HYPEUSDT, TRUMPUSDT,
+  ]
+  live_candidates: 40        # live: top-N symbols by 24h volume to watch
+
+scanner:
+  min_quote_volume_24h: 50000000   # $50M
+  atr_period_bars: 48              # 5m bars → last 4h
+  top_n: 8
+  rescan_minutes: 15
+
+strategy:
+  rsi_period: 14
+  rsi_oversold: 30
+  rsi_overbought: 70
+  atr_period: 14
+  pivot_left: 3
+  pivot_right: 3
+  history_5m_bars: 288             # 24h of 5m bars used for levels/trendlines
+  zone_tolerance_atr: 0.25         # cluster pivots within this × ATR(5m)
+  zone_min_touches: 2
+  trendline_lookback_pivots: 6     # consider the last N pivots of each kind
+  trendline_break_tolerance_atr: 0.1
+  proximity_atr: 0.3               # price must come within this × ATR(5m) of the level
+  touch_lookback_bars: 3           # 1m bars in which the level touch may have happened
+  stop_buffer_atr: 0.5             # stop beyond level by this × ATR(1m)
+  min_stop_pct: 0.0015             # 0.15% minimum stop distance
+  max_stop_pct: 0.03               # skip setups needing a stop wider than 3%
+  take_profit_r: 2.0               # 1.5R + fees rarely clears min R:R on tight stops
+  min_reward_risk_after_fees: 1.2
+  time_stop_minutes: 30
+  cooldown_minutes: 5
+
+risk:
+  risk_per_trade: 0.02             # 2% of equity
+  max_margin_per_position: 0.5     # fraction of equity usable as margin by one position
+  max_positions: 2
+  daily_loss_limit: 0.06           # stop for the UTC day after -6%
+  max_trades_per_day: 40
+
+live:
+  db_path: data/live.db
+  candidate_refresh_hours: 6
+  warmup_bars: 1500

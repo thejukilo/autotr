@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+*.egg-info/
+build/
+dist/
+
+# Bot data / outputs
+data/
+reports/
+*.db
+*.db-journal
+config/local.yaml
+
+# Editor / env
+.ona/
+.DS_Store
