@@ -67,6 +67,20 @@ account in `data/live_momentum.db`, and acts only when a 4h candle closes (00, 0
 It needs about 13 days of 4h history, which it downloads at start-up, so it can trade from the first
 4h close. Expect about one trade a day, and losing weeks: judge it after a few months, not days.
 
+### Web dashboard
+
+```bash
+uv run autotr web --config config/momentum.yaml             # http://<server>:8080, Ctrl+C to stop
+```
+
+A read-only page with equity, return, the equity curve, open positions, closed trades and when the
+bot last received market data; it refreshes every 30 s. Run it next to `live` (it only reads the
+account file, so starting or stopping it never affects the bot). It is password protected (any
+username): the password is printed at start-up and stored in `data/web_password.txt` (generated on
+first start; edit the file to change it), or set `AUTOTR_WEB_PASSWORD`. Use `--port` for another
+port and `--host 127.0.0.1` to make it reachable only from the machine itself. The connection is
+plain HTTP, so use a password you don't use anywhere else.
+
 ### Strategy research
 
 ```bash

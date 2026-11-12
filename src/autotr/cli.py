@@ -248,6 +248,37 @@ def status(db: Optional[Path] = typer.Option(None), config: Optional[Path] = Con
 
 
 @app.command()
+def web(
+    host: str = typer.Option("0.0.0.0", help="Address to listen on (127.0.0.1 = this machine only)"),
+    port: int = typer.Option(8080, help="Port to listen on"),
+    db: Optional[Path] = typer.Option(None, help="SQLite file of the paper account"),
+    config: Optional[Path] = ConfigOpt,
+) -> None:
+    """Password-protected, read-only web dashboard of the paper account (runs next to `live`)."""
+    from autotr.web import load_password, make_server
+
+    _setup_logging(False)
+    cfg = load_config(config)
+    db_path = db or Path(cfg.live.db_path)
+    password, pw_file = load_password(Path(cfg.data.dir))
+    try:
+        srv = make_server(host, port, db_path, cfg, password)
+    except OSError as exc:
+        typer.echo(f"Cannot listen on {host}:{port}: {exc.strerror}. Is the dashboard already running? "
+                   "Pick another port with --port.", err=True)
+        raise typer.Exit(1)
+    typer.echo(f"Dashboard for {db_path} on http://{host}:{port}  (Ctrl+C to stop)")
+    typer.echo("Login: any username, password "
+               + (f"in {pw_file}: {password}" if pw_file else "from $AUTOTR_WEB_PASSWORD"))
+    try:
+        srv.serve_forever()
+    except KeyboardInterrupt:
+        typer.echo("\nstopped")
+    finally:
+        srv.server_close()
+
+
+@app.command()
 def optimize(
     train_start: str = typer.Option(..., help="First training day YYYY-MM-DD"),
     train_end: str = typer.Option(..., help="Last training day YYYY-MM-DD"),
