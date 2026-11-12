@@ -1,6 +1,11 @@
 # Best strategy from the Nov 2026 strategy search (see docs/RESEARCH_LOG.md): cross-sectional 7-day momentum,
 # long top 2 / short bottom 2 every 4h, 3 ATR stop + 3 ATR trailing stop. Positive in all 6 test windows incl. holdout.
-# uv run autotr backtest --config config/momentum.yaml
+# Backtest:            uv run autotr backtest --config config/momentum.yaml
+# Live paper trading:  uv run autotr live --config config/momentum.yaml
+universe:
+  live_use_symbols: true     # trade the same 34 coins as in the research, ranked against each other
+live:
+  db_path: data/live_momentum.db   # separate paper account from the default strategy
 scanner:
   rank_by: volatility
   top_n: 34

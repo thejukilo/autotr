@@ -32,6 +32,7 @@ class DataCfg(BaseModel):
 class UniverseCfg(BaseModel):
     symbols: list[str] = []
     live_candidates: int = 40
+    live_use_symbols: bool = False   # live: watch exactly `symbols` (the backtested list) instead of the top-N by volume
 
 
 class ScannerCfg(BaseModel):

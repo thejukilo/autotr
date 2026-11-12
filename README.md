@@ -54,6 +54,19 @@ uv run autotr live --reset    # throw away the paper account and start again wit
 
 Add `-v` to `backtest` or `live` for debug logs (every signal, scanner changes).
 
+### Paper trading the momentum strategy (real-time)
+
+```bash
+uv run autotr live --config config/momentum.yaml            # start (Ctrl+C to stop, resumes on restart)
+uv run autotr status --config config/momentum.yaml          # balance, trades, open positions
+uv run autotr live --config config/momentum.yaml --reset    # start over with $100
+```
+
+It watches the same 34 coins as the research (`universe.live_use_symbols`), keeps its own paper
+account in `data/live_momentum.db`, and acts only when a 4h candle closes (00, 04, 08, 12, 16, 20 UTC).
+It needs about 13 days of 4h history, which it downloads at start-up, so it can trade from the first
+4h close. Expect about one trade a day, and losing weeks: judge it after a few months, not days.
+
 ### Strategy research
 
 ```bash

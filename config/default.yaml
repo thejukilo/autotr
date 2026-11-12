@@ -27,6 +27,7 @@ universe:
     TAOUSDT, HYPEUSDT, TRUMPUSDT,
   ]
   live_candidates: 40        # live: top-N symbols by 24h volume to watch
+  live_use_symbols: false    # live: true = watch exactly the symbols above (as in backtests)
 
 scanner:
   rank_by: change_24h              # change_24h (biggest 24h movers) | volatility (5m ATR%)

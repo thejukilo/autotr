@@ -50,7 +50,13 @@ class BinanceFeed:
         perps = set(usdt_perpetuals(info))
         vols, _ = await self.rest.ticker_24h()
         ranked = sorted((s for s in perps if s in vols), key=lambda s: vols[s], reverse=True)
-        chosen = ranked[: self.cfg.universe.live_candidates]
+        if self.cfg.universe.live_use_symbols:
+            missing = [x for x in self.cfg.universe.symbols if x not in perps]
+            if missing:
+                log.warning("not tradable on Binance (skipped): %s", ", ".join(missing))
+            chosen = [x for x in self.cfg.universe.symbols if x in perps]
+        else:
+            chosen = ranked[: self.cfg.universe.live_candidates]
         for s in self.must_watch():
             if s not in chosen:
                 chosen.append(s)
