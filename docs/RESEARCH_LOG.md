@@ -62,3 +62,54 @@ and simply aren't traded there.
 | xs_mom_trail_b | k=2, 14d momentum, 3.5 ATR stop/trail |
 | donchian_trail | 4h Donchian-30, EMA50, 2.5 ATR stop, 3 ATR trail |
 | donchian_trail_b | 4h Donchian-60, 3 ATR stop, 3.5 ATR trail |
+
+### Round 3 results
+| Config | R1 | R2 | V1 | V2 | Verdict |
+|---|---|---|---|---|---|
+| xs_mom_trail_a | +6.4% PF1.21 | +10.0% PF1.28 | +3.7% PF1.23 | +6.0% PF1.19 | passes criteria; shorts carry it (long ≈ +0.01R) |
+| xs_mom_trail_b | +9.7% PF1.34 | +12.4% PF1.50 | +6.7% PF1.56 | +2.1% PF1.09 | 4/4 positive; both sides positive |
+| donchian_trail | +0.9% | −2.9% | −10.3% | +0.6% | dead: fees fixed but no gross edge |
+| donchian_trail_b | −0.1% | −2.7% | −9.2% | −5.8% | dead |
+
+### Robustness grid around xs_mom_trail_a (16 variants)
+All 16 have positive trade-weighted avg R; 8 are positive in all 4 windows. k is the key parameter (k2 +0.160R, k3 +0.085, k4 +0.017, k5 +0.003).
+Lookback 7–14d works, 4d doesn't; stop 3–4 ATR fine, 2 ATR breaks V2; trail 3 ATR steadiest; 1h bars swing +46%/−25%;
+higher fees cost ~2 points/window; EMA filter not needed (noema ≥ base). short_only +10–16% in every window, long_only lost
+17.8% in V1 → edge is mostly shorting the weakest coins in bear markets.
+
+### Round 4 (R/V)
+| Config | R1 | R2 | V1 | V2 | Pos |
+|---|---|---|---|---|---|
+| xs_mom_k2_noema | +17.0% PF1.68 | +15.2% PF1.46 | +10.1% PF1.65 | +4.3% PF1.15 | 4/4 |
+| xs_mom_k1_noema | +7.2% | +16.5% | +1.9% | −3.1% | 3/4 |
+| xs_mom_b_ts20 | +7.0% | +18.4% | +4.3% | −2.9% | 3/4 |
+| xs_mom_b_lb126 | +17.9% | +3.8% | +0.6% | +0.4% | 4/4 (thin in V) |
+| xs_mom_b_k3 | +14.4% | −2.8% | +9.1% | −1.6% | 2/4 |
+| xs_mom_b_ts20_lb126 | +12.3% | +4.6% | +0.6% | +3.9% | 4/4 (thin in V) |
+
+## Holdout pre-registration (decided BEFORE running any holdout window)
+Finalists, chosen on consistency across R1/R2/V1/V2 (not peak return):
+1. **xs_mom_k2_noema**: primary candidate (k=2, 7d lookback, no trend filter, 3 ATR stop + trail; simplest, avg R +0.16)
+2. **xs_mom_trail_b**: k=2, 14d lookback, 3.5 ATR stop/trail, both sides positive in research
+3. **xs_mom_trail_a**: the original candidate (k=3, EMA50), as reference
+Each is run once on H1 (2026-07-15..09-15) and H2 (09-16..11-10). No changes afterwards based on holdout results.
+Success = positive in both holdout windows.
+
+## Holdout results (each finalist run once, no changes)
+| Config | H1 (07-15..09-15) | H2 (09-16..11-10) | Passes |
+|---|---|---|---|
+| **xs_mom_k2_noema** | +6.1% PF1.25, 60 tr, +0.112R | +8.3% PF1.45, 53 tr, +0.160R | **yes** |
+| **xs_mom_trail_a** | +19.0% PF1.99, 58 tr, +0.328R | +5.1% PF1.28, 53 tr, +0.113R | **yes** |
+| xs_mom_trail_b | +3.3% PF1.16, 51 tr, +0.082R | −6.2% PF0.73, 56 tr, −0.108R | no |
+
+Holdout regime: H1 BTC +16.3%, median coin +9.6%, 23/34 coins up (**bull market**, the first non-bear window);
+H2 BTC −2.4%, median −3.3%, 15/34 up (flat/down, wide dispersion).
+
+## Conclusion
+**Best strategy: xs_mom_k2_noema** (pre-registered primary). Every 4h, rank all coins by 7-day return; long the top 2, short
+the bottom 2; 3 ATR(4h) initial stop, chandelier trail 3 ATR behind the best close, no target, 10-day time stop, 1% risk.
+Positive in all 6 windows (16 months, bear + bull + flat): +17.0, +15.2, +10.1, +4.3, +6.1, +8.3% (PF 1.15–1.68), ≈ +0.15R per trade,
+~1 trade/day, survives ~2× fees. xs_mom_trail_a (k=3, EMA50) also passes all 6 windows and is a close second.
+
+Limits: small edge per trade; profit relies on a few +4–8R trend trades; 34 of today's coins (survivorship); simulated fills;
+the holdout is now spent, so further tuning would need new data (e.g. paper trading forward from 2026-11-11).

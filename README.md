@@ -13,9 +13,9 @@ money is used.**
   minimum-notional rules
 - The same strategy code runs in **backtests**, **historical replays** and **live paper trading**
 
-> ⚠️ This is an experiment, not financial advice. The original strategies are **unprofitable**; a
-> strategy search found one small, not-yet-confirmed edge (see [Current results](#current-results)).
-> Don't trade real money with it.
+> ⚠️ This is an experiment, not financial advice. The original strategies are **unprofitable**. A
+> strategy search found one small edge, cross-sectional momentum, which held up on unseen data
+> (see [Current results](#current-results)). It's still only a simulation: don't trade real money with it.
 
 ## Setup (on your own computer)
 
@@ -145,47 +145,54 @@ contributes. The original 1m scalper is still available: `--config config/scalpe
 
 ## Current results
 
-### Strategy search (Nov 2026)
+### Strategy search (Nov 2026): best strategy found
 
-Fifteen strategies were generated and tested by a creator agent and tester agents, on 34 coins with
-realistic fees, using separate data windows so that ideas are not tuned on the data they are judged on:
+**Winner: cross-sectional momentum (`config/momentum.yaml`).** Every 4 hours, rank all 34 coins by
+their 7-day return; go **long the 2 strongest and short the 2 weakest**. Initial stop 3 ATR (4h);
+then a trailing stop 3 ATR behind the best close since entry; no fixed target; 10-day time limit;
+1% risk per trade. About one trade a day.
 
-| Window | Use | Period |
+| | R1 | R2 | V1 | V2 | **H1 (holdout)** | **H2 (holdout)** |
+|---|---|---|---|---|---|---|
+| Period | Aug–Oct 2025 | Jan–Mar 2026 | Nov–Dec 2025 | Apr–Jun 2026 | Jul–Sep 2026 | Sep–Nov 2026 |
+| Market (median coin) | −21% | −29% | −37% | −18% | **+10% (bull)** | −3% (flat) |
+| **Momentum, k=2** | +17.0% PF 1.68 | +15.2% PF 1.46 | +10.1% PF 1.65 | +4.3% PF 1.15 | **+6.1% PF 1.25** | **+8.3% PF 1.45** |
+| Momentum, k=3 + EMA50 | +6.4% PF 1.21 | +10.0% PF 1.28 | +3.7% PF 1.23 | +6.0% PF 1.19 | +19.0% PF 1.99 | +5.1% PF 1.28 |
+| Momentum, k=2, 14-day | +9.7% PF 1.34 | +12.4% PF 1.50 | +6.7% PF 1.56 | +2.1% PF 1.09 | +3.3% PF 1.16 | −6.2% PF 0.73 |
+
+PF = profit factor (gross wins / gross losses). Returns are for each window separately, starting from $100.
+
+**How it was found.** A creator agent wrote strategies, and two tester agents backtested and analysed them, over 4 rounds
+and about 40 configurations. The data was split so that ideas are never judged on the data they were built on:
+
+- **Research windows (R1, R2):** strategies were designed and diagnosed on these.
+- **Validation windows (V1, V2):** used only to accept or reject ideas.
+- **Holdout windows (H1, H2):** locked until the end. The three finalists were written down *before* the holdout was run, then
+  each was run once. Two of the three passed. The k=2 version was the pre-registered first choice.
+
+**What was learned**
+
+| Strategy family | Result | Why |
 |---|---|---|
-| R1, R2 | research: strategies are designed and diagnosed on these | Aug–Oct 2025, Jan–Mar 2026 |
-| V1, V2 | validation: accept / reject only | Nov–Dec 2025, Apr–Jun 2026 |
-| H1, H2 | holdout: locked until the final candidate | Jul–Sep 2026, Sep–Nov 2026 |
+| 1m scalper, 5m confluence (manual method), 15m trend pullback | −60% to −90% | 5–13 trades a day; fees eat any edge |
+| Fading big moves (exhaustion fade, Bollinger reversion) | regime-dependent | only works in choppy markets, loses in trends |
+| Breakouts (Donchian, Bollinger squeeze), 1h and 4h | break-even to −39% | false breakouts; no edge before fees |
+| Cross-sectional momentum + fixed 3R target | marginal | caps the few big winners that carry the profit |
+| **Cross-sectional momentum + trailing stop** | **positive in all 6 windows** | rides relative strength for days; low fees |
 
-Research strategies risk 1% per trade with up to 4 positions. Profit factor (PF) = gross wins / gross losses.
+- **Short holds lose, long holds win.** In every strategy, trades closed within a few hours lost money and trades held
+  12–48 hours made money.
+- **Relative strength across coins carries the edge, not trend breakouts.** Single-coin breakouts with the same exits had no edge.
+- **Robustness:** 16 one-parameter variations all had a positive average result. The edge is best with the 2–3 most extreme
+  coins per side (it fades for k ≥ 4), a 7–14-day lookback, stops of 3–4 ATR and 4h bars. It survives roughly 2× fees.
+- **Limits:**
+  - The edge per trade is small (about +0.15R).
+  - Profit relies on a few +4R to +8R trend trades.
+  - In the bear windows most profit came from the shorts, and only one bull window was available to test.
+  - The coin list is today's (survivorship bias), and all fills are simulated.
+  - The holdout is now used up, so the next honest test is paper trading forward from 2026-11-11.
 
-| Strategy | R1 | R2 | V1 | V2 | Verdict |
-|---|---|---|---|---|---|
-| **xs_mom_trail_a**: 4h cross-sectional momentum + trailing stop | **+6.4%** PF 1.21 | **+10.0%** PF 1.28 | **+3.7%** PF 1.23 | **+6.0%** PF 1.19 | **candidate** (robustness + holdout checks running) |
-| xs_momentum: same entries, fixed 3R target | +4.2% PF 1.08 | +6.5% PF 1.11 | −3.8% PF 0.89 | +0.7% PF 1.02 | marginal |
-| donchian_trail: 4h breakout + trailing stop | +0.9% | −2.9% | −10.3% | +0.6% | break-even |
-| donchian_trend: 1h breakout, 2.5R | −9.8% | +17.9% | −30.7% | −27.4% | dead |
-| bb_reversion: 1h Bollinger fade (ADX < 22) | −9.0% | −10.2% | +17.3% | +22.1% | regime-dependent |
-| bb_reversion_v2: re-entry, wider stop | −16.0% | −49.7% | +3.4% | +15.1% | dead |
-| exhaustion_fade: 24h mover reversal | −3.0% | −7.2% | +1.3% | +7.1% | marginal |
-| squeeze_breakout: 1h Bollinger squeeze | −18.6% | −35.6% | −38.9% | −31.1% | dead |
-| trend_pullback: 4h trend, 15m RSI dip | −89.3% | −82.8% | −58.8% | −72.5% | dead |
-
-**xs_mom_trail_a** ranks all coins every 4 hours by their 7-day return, goes long the 3 strongest
-(if above their 50-bar EMA) and short the 3 weakest (if below), with a 3 ATR stop that trails
-3 ATR behind the best close and no fixed target. It trades about once a day.
-
-Conclusions so far:
-- **Low-timeframe trading is killed by fees.** Strategies on 1m–15m entries trade 5–13 times a day
-  and lose 60–90% even when they are roughly break-even before fees.
-- **Short holds lose, long holds win.** Across every strategy, trades closed within a few hours
-  lost money and trades held 12–48h made money: tight stops get hit by noise before the idea plays out.
-- **Fading big moves doesn't work reliably** (scalper, confluence, exhaustion fade, Bollinger fade):
-  it only paid off in the choppier validation windows.
-- **Relative-strength momentum is the only idea with an edge in every window**, and only once
-  winners were allowed to run with a trailing stop. The edge is small (≈ +0.08R per trade), so it
-  still has to survive parameter-robustness checks, higher fees and the locked holdout windows.
-- Caveats: all four research/validation windows are bear markets (median coin −18% to −37%); the
-  coin list is today's (survivorship bias); results are simulations.
+Full details: [docs/RESEARCH_LOG.md](docs/RESEARCH_LOG.md).
 
 ### Original strategies
 
@@ -221,6 +228,7 @@ What the data says:
 
 ```
 config/default.yaml      all settings
+config/momentum.yaml     best strategy from the research (cross-sectional momentum)
 config/research/         configs of the research strategies (+ robust/ variations)
 src/autotr/
   data/                  historical downloader, Binance REST + WebSocket feed, replay
