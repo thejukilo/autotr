@@ -55,6 +55,16 @@ class RiskManager:
     def _reject(self, reason: str) -> None:
         self.rejections[reason] += 1
 
+    def _risk_fraction(self, sig: Signal) -> float:
+        """Fraction of equity to risk on this trade. With confidence_sizing on, it scales linearly
+        with the signal's conviction (0..1) between conf_risk_min and conf_risk_max; otherwise flat."""
+        cfg = self.cfg
+        if not (cfg.confidence_sizing and cfg.conf_risk_max > 0):
+            return cfg.risk_per_trade
+        lo = cfg.conf_risk_min if cfg.conf_risk_min > 0 else cfg.risk_per_trade
+        conf = min(max(sig.confidence, 0.0), 1.0)
+        return lo + (cfg.conf_risk_max - lo) * conf
+
     # ------------------------------------------------------------ decision
     def evaluate(self, sig: Signal, ex: PaperExchange) -> PendingEntry | None:
         st, cfg, xc = self.state, self.cfg, self.ex_cfg
@@ -90,7 +100,7 @@ class RiskManager:
             return s * (p - stop) + p * entry_cost + stop * exit_cost
 
         equity = ex.equity()
-        risk_budget = equity * cfg.risk_per_trade
+        risk_budget = equity * self._risk_fraction(sig)
         avg_price = sum(p * w for p, w in levels)
         qty = risk_budget / sum(w * unit_loss(p) for p, w in levels)  # full fill risks exactly the budget
         max_notional = min(
@@ -126,7 +136,7 @@ class RiskManager:
             symbol=sig.symbol, side=sig.side, qty=sum(r.qty for r in rungs), stop=stop, take_profit=tp,
             risk_usd=sum(r.qty * unit_loss(p) for r, p in zip(rungs, prices)), created_ts=sig.ts,
             time_stop_ms=self.strat_cfg.time_stop_minutes * MINUTE_MS, reason=sig.reason,
-            rungs=rungs, expiry_ts=expiry,
+            rungs=rungs, expiry_ts=expiry, confidence=sig.confidence,
         )
 
     # ------------------------------------------------------------ persistence

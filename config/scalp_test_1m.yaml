@@ -30,9 +30,14 @@ universe:
 live:
   db_path: data/live_scalptest_1m.db   # its own paper account — run it next to the 5m version
 research: {windows: scalp}
-exchange: {taker_fee: 0.0005, maker_fee: 0.0002, slippage_bps: 5.0}
+exchange: {taker_fee: 0.0005, maker_fee: 0.0002, slippage_bps: 5.0, leverage: 10}
 scanner: {rank_by: change_24h, top_n: 20, min_quote_volume_24h: 20000000, rescan_minutes: 15}
-risk: {risk_per_trade: 0.0025, max_positions: 8, max_trades_per_day: 1000, daily_loss_limit: 0.9}
+# Confidence-based sizing: risk per trade scales with the signal's conviction (strong + high-volume +
+# clean ignitions size up). 0.5% on the weakest signal, up to 2% on the strongest, vs the old flat
+# 0.25% — so positions are bigger overall and biggest where the setup is best. leverage 10 (was 5) so
+# the larger high-conviction entries still fit under the margin / free-balance cap when several are open.
+risk: {risk_per_trade: 0.0025, max_positions: 8, max_trades_per_day: 1000, daily_loss_limit: 0.9,
+       confidence_sizing: true, conf_risk_min: 0.005, conf_risk_max: 0.02}
 strategy:
   name: scalp_ignition
   entry_tf_minutes: 1         # decide every minute (the finest Binance perps allow)

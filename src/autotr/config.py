@@ -108,6 +108,11 @@ class RiskCfg(BaseModel):
     max_positions: int = 2
     daily_loss_limit: float = 0.06
     max_trades_per_day: int = 40
+    # Confidence-based sizing: when on, risk per trade scales with the signal's conviction (0..1)
+    # between conf_risk_min (weakest) and conf_risk_max (strongest) instead of the flat risk_per_trade.
+    confidence_sizing: bool = False
+    conf_risk_min: float = 0.0   # risk fraction at confidence 0 (0 = fall back to risk_per_trade)
+    conf_risk_max: float = 0.0   # risk fraction at confidence 1 (0 = disables confidence sizing)
 
 
 class ResearchCfg(BaseModel):

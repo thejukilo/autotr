@@ -17,13 +17,17 @@ deepest last; default equal) spread the entry evenly from close-r1xATR5 to close
 from __future__ import annotations
 
 from autotr.models import Side
-from autotr.strategy.research._common import signal
+from autotr.strategy.research._common import efficiency_ratio, signal
 from autotr.strategy.research._scalp import make_book, atr_bars, best_close, far_target, hour_ok, side_ok
 
 DEFAULTS = dict(ret_n=12, min_ret=0.06, vol_mult=4.0, min_change=0.12, r1=0.5, r2=1.0, stop_atr=2.0,
                 min_stop=0.025, trail=3.0, trail_after_r=1.0, atr_n=14, min_bars=250, max_per_day=1,
                 market=False, longs=True, shorts=True, skip_hours=(), max_change=0.0,
-                rungs=2, weights=None)
+                rungs=2, weights=None,
+                # Conviction (0..1) for confidence-based sizing: averages three saturating gauges of
+                # the ignition's quality. conf_ret = the 1h return that counts as full-strength impulse;
+                # conf_vol = the volume multiple that counts as a full-strength surge.
+                conf_ret=0.03, conf_vol=10.0)
 
 
 class Strategy:
@@ -60,6 +64,11 @@ class Strategy:
         base = sum(b.volume for b in rest) / len(rest) * n
         if base <= 0 or hour_vol < p["vol_mult"] * base:
             return None
+        # Conviction (0..1): strong impulse + big volume surge + a clean (non-choppy) run size up.
+        volx = hour_vol / base
+        er = efficiency_ratio([b.close for b in bars], n)      # 0 = chop, 1 = straight line
+        sat = lambda x, ref: min(x / ref, 1.0) if ref > 0 else 1.0  # noqa: E731
+        conf = (sat(abs(ret), p["conf_ret"]) + sat(volx, p["conf_vol"]) + er) / 3.0
         a = atr_bars(bars, p["atr_n"])
         if a <= 0:
             return None
@@ -87,6 +96,7 @@ class Strategy:
         if sig is not None:
             if n > 1:
                 sig.ladder = [(px, w / tw) for px, w in zip(rungs, weights)]
+            sig.confidence = conf
             self.book.record(st.symbol, ts)
         return sig
 

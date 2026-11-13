@@ -38,8 +38,8 @@ def _read(db_path: Path) -> tuple[list[Trade], list[EquityPoint], dict | None]:
         rows = db.execute(
             "SELECT symbol, side, qty, entry_price, exit_price, entry_ts, exit_ts, gross_pnl, fees, funding,"
             " exit_reason, risk_usd, entry_reason, COALESCE(stop, 0), COALESCE(take_profit, 0),"
-            " COALESCE(fills, 1) FROM trades ORDER BY id").fetchall()
-        trades = [Trade(r[0], Side(r[1]), *r[2:]) for r in rows]
+            " COALESCE(fills, 1), COALESCE(confidence, 1.0) FROM trades ORDER BY id").fetchall()
+        trades = [Trade(r[0], Side(r[1]), *r[2:16], confidence=r[16]) for r in rows]
         equity = [EquityPoint(*r) for r in db.execute(
             "SELECT ts, equity, balance, open_positions FROM equity ORDER BY ts")]
         row = db.execute("SELECT value FROM state WHERE key = 'engine'").fetchone()
@@ -68,6 +68,7 @@ def snapshot(db_path: Path, cfg: Config, now_ms: int | None = None) -> dict:
         "account_file": db_path.name,
         "next_decision": (now_ms // tf_ms + 1) * tf_ms,
         "decision_every_min": cfg.strategy.entry_tf_minutes,
+        "confidence_sizing": cfg.risk.confidence_sizing,
     }
     if not db_path.exists():
         return {**base, "account": None}
@@ -86,6 +87,7 @@ def snapshot(db_path: Path, cfg: Config, now_ms: int | None = None) -> dict:
             "last_price": last, "stop": p["stop"], "take_profit": p["take_profit"], "entry_ts": p["entry_ts"],
             "margin": p["margin"], "risk_usd": p["risk_usd"],
             "upnl": sign * (last - p["entry_price"]) * p["qty"],
+            "conf": p.get("confidence", 1.0),
         })
     balance = ex["balance"]
     upnl = sum(p["upnl"] for p in positions)
@@ -109,6 +111,7 @@ def snapshot(db_path: Path, cfg: Config, now_ms: int | None = None) -> dict:
         "symbol": t.symbol, "side": t.side.value, "entry_ts": t.entry_ts, "exit_ts": t.exit_ts,
         "entry_price": t.entry_price, "exit_price": t.exit_price, "net_pnl": t.net_pnl,
         "r": t.r_multiple, "fees": t.fees, "reason": t.exit_reason,
+        "conf": t.confidence, "risk_usd": t.risk_usd,
     } for t in reversed(trades[-MAX_TRADES:])]
 
     return _finite({
@@ -320,6 +323,8 @@ function render(d) {
     return;
   }
   const a = d.account, m = d.metrics;
+  const showConf = !!d.confidence_sizing;
+  const confPct = v => (v == null ? "" : (v * 100).toFixed(0) + "%");
   st.innerHTML = d.running
     ? `<span class="dot" style="background:var(--good)"></span><span>✓ Running</span>`
     : `<span class="dot" style="background:var(--critical)"></span><span>✕ Not running: no market data for ${ago(d.now - (d.last_update || 0))}</span>`;
@@ -337,16 +342,18 @@ function render(d) {
   drawChart(d.equity, a.starting_balance);
 
   $("positions").innerHTML = d.positions.length ? `<table><tr><th>Coin</th><th class="l">Side</th><th>Qty</th><th>Entry</th>
-    <th>Last</th><th>Stop</th><th>P&amp;L</th><th>Opened</th></tr>` + d.positions.map(p => `<tr>
+    <th>Last</th><th>Stop</th>${showConf ? "<th>Conf</th>" : ""}<th>P&amp;L</th><th>Opened</th></tr>` + d.positions.map(p => `<tr>
     <td>${esc(p.symbol)}</td><td class="l">${p.side === "LONG" ? "▲ long" : "▼ short"}</td><td>${p.qty}</td>
     <td>${price(p.entry_price)}</td><td>${price(p.last_price)}</td><td>${price(p.stop)}</td>
+    ${showConf ? `<td>${confPct(p.conf)}</td>` : ""}
     <td class="${cls(p.upnl)}">${usd(p.upnl, true)}</td><td>${dt(p.entry_ts)}</td></tr>`).join("") + `</table>`
     : `<div class="empty">No open positions.</div>`;
 
   $("trades").innerHTML = d.trades.length ? `<table><tr><th>Coin</th><th class="l">Side</th><th>Opened</th><th>Closed</th>
-    <th>Entry</th><th>Exit</th><th>Net</th><th>R</th><th class="l">Exit reason</th></tr>` + d.trades.map(t => `<tr>
+    <th>Entry</th><th>Exit</th>${showConf ? "<th>Conf</th>" : ""}<th>Net</th><th>R</th><th class="l">Exit reason</th></tr>` + d.trades.map(t => `<tr>
     <td>${esc(t.symbol)}</td><td class="l">${t.side === "LONG" ? "▲ long" : "▼ short"}</td><td>${dt(t.entry_ts)}</td>
     <td>${dt(t.exit_ts)}</td><td>${price(t.entry_price)}</td><td>${price(t.exit_price)}</td>
+    ${showConf ? `<td>${confPct(t.conf)}</td>` : ""}
     <td class="${cls(t.net_pnl)}">${usd(t.net_pnl, true)}</td><td>${t.r >= 0 ? "+" : "−"}${Math.abs(t.r).toFixed(2)}</td>
     <td class="l">${esc(t.reason)}</td></tr>`).join("") + `</table>`
     : `<div class="empty">No closed trades yet. Expect about one a day.</div>`;

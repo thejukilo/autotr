@@ -48,6 +48,7 @@ class Signal:
     reason: str
     # Optional limit-order ladder: [(price, weight), ...] nearest rung first; weights sum to 1.
     ladder: list[tuple[float, float]] | None = None
+    confidence: float = 1.0   # 0..1 conviction; scales position size when risk.confidence_sizing is on
 
 
 @dataclass(slots=True)
@@ -70,6 +71,7 @@ class Trade:
     fills: int = 1           # ladder rungs filled
     signal_ts: int = 0       # when the strategy signalled (entry_ts is the first fill)
     rungs: tuple[float, ...] = ()  # planned limit prices, nearest first (empty = market entry)
+    confidence: float = 1.0  # 0..1 conviction the sizer used for this trade (1.0 = sizing off)
 
     @property
     def net_pnl(self) -> float:

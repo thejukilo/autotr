@@ -45,6 +45,7 @@ class PendingEntry:
     reason: str = ""
     rungs: list[Rung] = field(default_factory=list)
     expiry_ts: int | None = None  # unfilled limit rungs are cancelled after this time
+    confidence: float = 1.0
 
     def __post_init__(self) -> None:
         if not self.rungs:
@@ -75,6 +76,7 @@ class Position:
     fills: int = 1
     signal_ts: int = 0
     rungs: tuple[float, ...] = ()
+    confidence: float = 1.0
 
     @property
     def notional(self) -> float:
@@ -177,7 +179,8 @@ class PaperExchange:
             liq = liquidation_price(pe.side, price, self.cfg.leverage, self.cfg.maintenance_margin_rate)
             pos = Position(pe.symbol, pe.side, rung.qty, price, ts, pe.stop, pe.take_profit, margin, liq,
                            fee, risk, ts + pe.time_stop_ms, pe.reason, signal_ts=pe.created_ts,
-                           rungs=tuple(r.price for r in pe.rungs if r.price is not None))
+                           rungs=tuple(r.price for r in pe.rungs if r.price is not None),
+                           confidence=pe.confidence)
             self.positions[pe.symbol] = pos
             self.stats.entries_filled += 1
             for cb in self.on_open:
@@ -205,7 +208,7 @@ class PaperExchange:
         del self.positions[pos.symbol]
         trade = Trade(pos.symbol, pos.side, pos.qty, pos.entry_price, price, pos.entry_ts, ts,
                       gross, pos.entry_fee + fee, pos.funding, reason, pos.risk_usd, pos.reason,
-                      pos.stop, pos.take_profit, pos.fills, pos.signal_ts, pos.rungs)
+                      pos.stop, pos.take_profit, pos.fills, pos.signal_ts, pos.rungs, pos.confidence)
         self.trades.append(trade)
         for cb in self.on_trade:
             cb(trade)
@@ -219,7 +222,7 @@ class PaperExchange:
         del self.positions[pos.symbol]
         trade = Trade(pos.symbol, pos.side, pos.qty, pos.entry_price, pos.liq_price, pos.entry_ts, ts,
                       -pos.margin, pos.entry_fee, pos.funding, "liquidation", pos.risk_usd, pos.reason,
-                      pos.stop, pos.take_profit, pos.fills, pos.signal_ts, pos.rungs)
+                      pos.stop, pos.take_profit, pos.fills, pos.signal_ts, pos.rungs, pos.confidence)
         self.trades.append(trade)
         for cb in self.on_trade:
             cb(trade)
