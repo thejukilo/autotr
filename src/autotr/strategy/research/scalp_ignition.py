@@ -10,6 +10,8 @@ Hypothesis: attention shocks at the start of a move continue intraday; catching 
 (before it is a stale top mover) with a trailing exit keeps the profit tail.
 Round 2 params: `longs` / `shorts` (side filter), `skip_hours` (UTC hours of the signal candle close).
 Round 3 param: `max_change` (0 = off): skip signals with |change_24h| >= max_change (fresh movers only).
+Ladder params (market=false): `rungs` (number of limit rungs, default 2) and `weights` (per-rung size,
+deepest last; default equal) spread the entry evenly from close-r1xATR5 to close-r2xATR5.
 """
 
 from __future__ import annotations
@@ -20,7 +22,8 @@ from autotr.strategy.research._scalp import make_book, atr_bars, best_close, far
 
 DEFAULTS = dict(ret_n=12, min_ret=0.06, vol_mult=4.0, min_change=0.12, r1=0.5, r2=1.0, stop_atr=2.0,
                 min_stop=0.025, trail=3.0, trail_after_r=1.0, atr_n=14, min_bars=250, max_per_day=1,
-                market=False, longs=True, shorts=True, skip_hours=(), max_change=0.0)
+                market=False, longs=True, shorts=True, skip_hours=(), max_change=0.0,
+                rungs=2, weights=None)
 
 
 class Strategy:
@@ -60,8 +63,19 @@ class Strategy:
         a = atr_bars(bars, p["atr_n"])
         if a <= 0:
             return None
-        r1, r2 = c - s * p["r1"] * a, c - s * p["r2"] * a
-        avg = c if p["market"] else (r1 + r2) / 2
+        r2 = c - s * p["r2"] * a                       # deepest rung offset (the stop sits below it)
+        n = 1 if p["market"] else max(1, int(p["rungs"]))
+        if n <= 1:
+            rungs, weights = [c], [1.0]                 # market / single: fill at the signal close
+        else:
+            # Spread n limit rungs from r1 (shallow) to r2 (deepest, by the stop) for a better average
+            # entry; `weights` biases size toward the deeper rungs (deepest last; default equal).
+            offs = [p["r1"] + (p["r2"] - p["r1"]) * i / (n - 1) for i in range(n)]
+            rungs = [c - s * o * a for o in offs]
+            weights = list(p["weights"]) if p["weights"] else [1.0] * n
+            weights = (weights + [weights[-1]] * n)[:n]
+        tw = sum(weights)
+        avg = sum(px * w for px, w in zip(rungs, weights)) / tw
         stop = r2 - s * p["stop_atr"] * a
         if s * (avg - stop) / avg < p["min_stop"]:
             stop = avg * (1 - s * p["min_stop"])
@@ -71,8 +85,8 @@ class Strategy:
         sig = signal(st.symbol, side, ts, c, stop, far_target(s, c, stop),
                      f"ignition 1h={ret:+.0%} vol={hour_vol / base:.1f}x ch={ch:+.0%}")
         if sig is not None:
-            if not p["market"]:
-                sig.ladder = [(r1, 0.5), (r2, 0.5)]
+            if n > 1:
+                sig.ladder = [(px, w / tw) for px, w in zip(rungs, weights)]
             self.book.record(st.symbol, ts)
         return sig
 

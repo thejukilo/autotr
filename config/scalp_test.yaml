@@ -20,7 +20,7 @@
 #   time_stop 600m -> 20m               very short holds; slots free up fast -> more trades
 #   top_n 8 -> 20, min 24h vol 50M -> 20M        a much wider pool of active coins
 #   max_positions 3 -> 8                more trades open at once
-#   market entry kept                   immediate fill on the signal bar
+#   laddered entry (3 rungs 20/30/50)   limit orders spread toward the stop for a better avg entry
 # Risk guards widened ON PURPOSE so it never halts and the account lasts for a long demo:
 #   daily_loss_limit 0.06 -> 0.9, max_trades_per_day 40 -> 1000, risk_per_trade 0.01 -> 0.0025.
 # It uses its own paper account so it never touches your other runs.
@@ -46,5 +46,8 @@ strategy:
   entry_history_bars: 12      # tiny "new high/low" window -> constant breakouts
   time_stop_minutes: 20       # very short holds so positions recycle fast
   cooldown_minutes: 3
-  ladder_expiry_bars: 1
-  params: {ret_n: 2, min_ret: 0.0, vol_mult: 0.0, min_change: 0.0, min_bars: 10, r1: 0.5, r2: 1.0, stop_atr: 1.0, min_stop: 0.004, trail: 1.5, trail_after_r: 0.5, max_per_day: 200, longs: true, shorts: true, skip_hours: [], market: true}
+  ladder_expiry_bars: 3       # give the limit rungs ~15 min to fill before cancelling
+  # Laddered entry (market: false): 3 limit rungs spread from 0.3 to 1.5 ATR(5m) below the signal
+  # price (mirrored for shorts), weighted 20/30/50 toward the deepest rung — a better average entry,
+  # like placing several orders toward your stop by hand. Stop sits 1.0 ATR below the deepest rung.
+  params: {ret_n: 2, min_ret: 0.0, vol_mult: 0.0, min_change: 0.0, min_bars: 10, r1: 0.3, r2: 1.5, rungs: 3, weights: [0.2, 0.3, 0.5], stop_atr: 1.0, min_stop: 0.004, trail: 1.5, trail_after_r: 0.5, max_per_day: 200, longs: true, shorts: true, skip_hours: [], market: false}
