@@ -61,13 +61,14 @@ def _finite(x):
 def snapshot(db_path: Path, cfg: Config, now_ms: int | None = None) -> dict:
     """Everything the dashboard shows, as plain JSON-able data."""
     now_ms = now_ms or int(time.time() * 1000)
-    tf_ms = cfg.strategy.entry_tf_minutes * MINUTE_MS
+    cad_s = cfg.live.decision_seconds or cfg.strategy.entry_tf_minutes * 60  # seconds between decisions
+    tf_ms = max(int(cad_s * 1000), 1000)
     base = {
         "now": now_ms,
         "strategy": cfg.strategy.name,
         "account_file": db_path.name,
         "next_decision": (now_ms // tf_ms + 1) * tf_ms,
-        "decision_every_min": cfg.strategy.entry_tf_minutes,
+        "decision_seconds": cad_s,
         "confidence_sizing": cfg.risk.confidence_sizing,
     }
     if not db_path.exists():
@@ -82,12 +83,30 @@ def snapshot(db_path: Path, cfg: Config, now_ms: int | None = None) -> dict:
     for p in ex["positions"]:
         last = last_price.get(p["symbol"], p["entry_price"])
         sign = 1 if p["side"] == Side.LONG.value else -1
+        upnl = sign * (last - p["entry_price"]) * p["qty"]
+        rungs = tuple(p.get("rungs", ()))
         positions.append({
             "symbol": p["symbol"], "side": p["side"], "qty": p["qty"], "entry_price": p["entry_price"],
             "last_price": last, "stop": p["stop"], "take_profit": p["take_profit"], "entry_ts": p["entry_ts"],
-            "margin": p["margin"], "risk_usd": p["risk_usd"],
-            "upnl": sign * (last - p["entry_price"]) * p["qty"],
-            "conf": p.get("confidence", 1.0),
+            "margin": p["margin"], "risk_usd": p["risk_usd"], "upnl": upnl,
+            "upnl_r": upnl / p["risk_usd"] if p.get("risk_usd") else 0.0,
+            "conf": p.get("confidence", 1.0), "fills": p.get("fills", 1), "planned_rungs": len(rungs),
+            "trailed": bool(p.get("stop_trailed")), "time_stop_ts": p.get("time_stop_ts"),
+        })
+    # Pending entries: un-triggered limit-order ladders (and their fill progress).
+    pending = []
+    for pe in ex.get("pending", []):
+        last = last_price.get(pe["symbol"], 0.0)
+        sign = 1 if pe["side"] == Side.LONG.value else -1
+        rungs = [{
+            "price": r["price"], "qty": r["qty"], "filled": bool(r["filled"]), "market": r["price"] is None,
+            "dist_pct": ((r["price"] / last - 1) * 100 * sign) if (r["price"] and last) else None,
+        } for r in pe.get("rungs", [])]
+        pending.append({
+            "symbol": pe["symbol"], "side": pe["side"], "stop": pe["stop"], "take_profit": pe["take_profit"],
+            "conf": pe.get("confidence", 1.0), "created_ts": pe["created_ts"], "expiry_ts": pe.get("expiry_ts"),
+            "last_price": last, "rungs": rungs,
+            "filled": sum(1 for r in rungs if r["filled"]), "total": len(rungs),
         })
     balance = ex["balance"]
     upnl = sum(p["upnl"] for p in positions)
@@ -126,10 +145,11 @@ def snapshot(db_path: Path, cfg: Config, now_ms: int | None = None) -> dict:
         },
         "last_update": last_minute,
         "running": bool(last_minute) and now_ms - last_minute < STALE_MS,
-        "pending_entries": len(ex.get("pending", [])),
+        "pending_entries": len(pending),
         "metrics": {k: m[k] for k in ("trades", "win_rate", "net_pnl", "fees", "funding", "profit_factor",
                                       "expectancy_r", "max_drawdown_pct", "by_side", "per_symbol")},
         "positions": positions,
+        "pending": pending,
         "trades": recent,
         "equity": [[ts, round(v, 4)] for ts, v in sampled],
     })
@@ -219,78 +239,152 @@ PAGE = r"""<!doctype html>
 <style>
 :root {
   color-scheme: light;
-  --surface-0: #f4f4f2; --surface-1: #fcfcfb; --border: #e3e2de;
+  --surface-0: #f4f4f2; --surface-1: #fcfcfb; --surface-2: #ececea; --border: #e3e2de;
   --text-primary: #0b0b0b; --text-secondary: #52514e; --text-muted: #7a7974;
   --grid: #ecebe7; --series-1: #2a78d6;
-  --good: #0ca30c; --good-text: #006300; --critical: #d03b3b; --critical-text: #b42f2f;
+  --good: #0ca30c; --good-text: #047804; --good-bg: #e6f6e6;
+  --critical: #d03b3b; --critical-text: #b42f2f; --critical-bg: #fbe7e7;
+  --info: #2a78d6; --info-text: #1f66bd; --info-bg: #e6effb;
+  --warn: #c98a00; --warn-text: #9c6c00; --warn-bg: #faf0d8;
+  --shadow: 0 1px 2px rgba(0,0,0,.04), 0 6px 20px rgba(0,0,0,.05);
 }
 @media (prefers-color-scheme: dark) {
   :root {
     color-scheme: dark;
-    --surface-0: #111110; --surface-1: #1a1a19; --border: #2c2c2a;
+    --surface-0: #111110; --surface-1: #1a1a19; --surface-2: #232321; --border: #2c2c2a;
     --text-primary: #f0efec; --text-secondary: #c3c2b7; --text-muted: #8f8e86;
     --grid: #2a2a28; --series-1: #3987e5;
-    --good-text: #4cc74c; --critical-text: #ef7a7a;
+    --good-text: #51cc51; --good-bg: #162d16;
+    --critical-text: #ef7a7a; --critical-bg: #391c1c;
+    --info-text: #6fa8e8; --info-bg: #182a40; --warn-text: #d8a93a; --warn-bg: #332a14;
+    --shadow: 0 1px 2px rgba(0,0,0,.3), 0 6px 20px rgba(0,0,0,.35);
   }
 }
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--surface-0); color: var(--text-primary);
   font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
-main { max-width: 1100px; margin: 0 auto; padding: 20px 16px 40px; }
-header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 16px; margin-bottom: 16px; }
-h1 { font-size: 18px; margin: 0; font-weight: 600; }
-h2 { font-size: 14px; margin: 0 0 10px; font-weight: 600; }
+main { max-width: 1120px; margin: 0 auto; padding: 18px 16px 48px; }
+header { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; margin-bottom: 16px; }
+h1 { font-size: 18px; margin: 0; font-weight: 700; letter-spacing: -.01em; }
+h2 { font-size: 13px; margin: 0; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--text-secondary); }
+.spacer { flex: 1; }
 .sub { color: var(--text-secondary); }
-.pill { display: inline-flex; align-items: center; gap: 6px; padding: 2px 10px; border-radius: 999px;
-  border: 1px solid var(--border); background: var(--surface-1); font-size: 13px; }
-.dot { width: 8px; height: 8px; border-radius: 50%; }
-.card { background: var(--surface-1); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px;
-  margin-bottom: 14px; }
-.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-bottom: 14px; }
-.tile { background: var(--surface-1); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; }
+.pill { display: inline-flex; align-items: center; gap: 6px; padding: 3px 11px; border-radius: 999px;
+  border: 1px solid var(--border); background: var(--surface-1); font-size: 13px; font-weight: 500; }
+.dot { width: 9px; height: 9px; border-radius: 50%; background: var(--text-muted); }
+.dot.live { background: var(--good); animation: pulse 1.8s ease-in-out infinite; }
+.dot.down { background: var(--critical); }
+@keyframes pulse { 0%,100% { box-shadow: 0 0 0 0 rgba(12,163,12,.5); } 50% { box-shadow: 0 0 0 5px rgba(12,163,12,0); } }
+.btn { font: inherit; font-size: 13px; cursor: pointer; border: 1px solid var(--border); background: var(--surface-1);
+  color: var(--text-secondary); border-radius: 8px; padding: 4px 10px; }
+.btn:hover { background: var(--surface-2); color: var(--text-primary); }
+.card { background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px;
+  margin-bottom: 14px; box-shadow: var(--shadow); }
+.card > .head { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+.count { color: var(--text-muted); font-size: 12px; font-weight: 500; }
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(156px, 1fr)); gap: 10px; margin-bottom: 14px; }
+.tile { background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px; box-shadow: var(--shadow); }
 .tile .label { color: var(--text-secondary); font-size: 12px; }
-.tile .value { font-size: 22px; font-weight: 600; font-variant-numeric: tabular-nums; margin-top: 2px; }
+.tile .value { font-size: 23px; font-weight: 700; font-variant-numeric: tabular-nums; margin-top: 2px; letter-spacing: -.02em; }
 .tile .hint { color: var(--text-muted); font-size: 12px; margin-top: 2px; }
+.tile.flash { animation: tileflash 1s ease-out; }
+@keyframes tileflash { from { background: var(--info-bg); } to { background: var(--surface-1); } }
 .pos { color: var(--good-text); } .neg { color: var(--critical-text); }
 .chart-wrap { position: relative; }
 svg text { fill: var(--text-muted); font-size: 11px; font-variant-numeric: tabular-nums; }
 .tip { position: absolute; pointer-events: none; background: var(--surface-1); border: 1px solid var(--border);
-  border-radius: 6px; padding: 6px 8px; font-size: 12px; white-space: nowrap; box-shadow: 0 2px 8px rgba(0,0,0,.12);
-  display: none; }
+  border-radius: 6px; padding: 6px 8px; font-size: 12px; white-space: nowrap; box-shadow: var(--shadow); display: none; }
 .tip b { font-variant-numeric: tabular-nums; }
 .scroll { overflow-x: auto; }
 table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
-th, td { padding: 6px 8px; text-align: right; white-space: nowrap; border-bottom: 1px solid var(--border); }
-th { color: var(--text-secondary); font-weight: 500; font-size: 12px; }
+th, td { padding: 7px 8px; text-align: right; white-space: nowrap; border-bottom: 1px solid var(--border); }
+th { color: var(--text-muted); font-weight: 500; font-size: 11px; text-transform: uppercase; letter-spacing: .03em; }
 th:first-child, td:first-child, th.l, td.l { text-align: left; }
-tr:last-child td { border-bottom: 0; }
+tbody tr:last-child td { border-bottom: 0; }
+tbody tr.flash td { animation: rowflash 1.4s ease-out; }
+@keyframes rowflash { 0% { background: var(--info-bg); } 100% { background: transparent; } }
+tbody tr.flash-up td { animation: rowup 1.6s ease-out; }
+@keyframes rowup { 0% { background: var(--good-bg); } 100% { background: transparent; } }
+.side { font-weight: 600; }
+.side.long { color: var(--good-text); } .side.short { color: var(--critical-text); }
+.badge { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 11px; font-weight: 600;
+  border: 1px solid transparent; }
+.b-tp { color: var(--good-text); background: var(--good-bg); }
+.b-trail { color: var(--info-text); background: var(--info-bg); }
+.b-sl { color: var(--critical-text); background: var(--critical-bg); }
+.b-time { color: var(--text-secondary); background: var(--surface-2); }
+.b-liq { color: #fff; background: var(--critical); }
+.conf { display: inline-flex; align-items: center; gap: 6px; }
+.confbar { width: 44px; height: 6px; border-radius: 3px; background: var(--surface-2); overflow: hidden; }
+.confbar > i { display: block; height: 100%; background: var(--accent, var(--series-1)); }
+.cd { font-variant-numeric: tabular-nums; color: var(--text-secondary); }
+.lock { color: var(--info-text); font-size: 11px; }
+/* pending limit-order ladders */
+.ladders { display: grid; grid-template-columns: repeat(auto-fill, minmax(290px, 1fr)); gap: 12px; }
+.ladder { border: 1px solid var(--border); border-radius: 10px; padding: 11px 12px; background: var(--surface-0); }
+.ladder.flash { animation: rowflash 1.4s ease-out; }
+.ladder .lh { display: flex; align-items: center; gap: 8px; margin-bottom: 9px; }
+.ladder .lh .sym { font-weight: 700; }
+.ladder .lh .meta { margin-left: auto; color: var(--text-muted); font-size: 12px; }
+.rung { display: grid; grid-template-columns: 16px 1fr auto; align-items: center; gap: 8px; padding: 3px 0; font-size: 13px; }
+.rung .mark { width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--text-muted); }
+.rung.filled .mark { background: var(--good); border-color: var(--good); }
+.rung.filled { color: var(--good-text); }
+.rung .wgt { color: var(--text-muted); font-size: 11px; }
+.rung .px { font-variant-numeric: tabular-nums; text-align: right; }
+.rung .dist { color: var(--text-muted); font-size: 11px; }
+.lbar { height: 6px; border-radius: 3px; background: var(--surface-2); margin: 8px 0 4px; overflow: hidden; }
+.lbar > i { display: block; height: 100%; background: var(--good); transition: width .3s; }
+.lfoot { display: flex; gap: 10px; color: var(--text-muted); font-size: 11.5px; flex-wrap: wrap; }
 .empty { color: var(--text-muted); padding: 8px 0; }
 footer { color: var(--text-muted); font-size: 12px; margin-top: 20px; }
+/* toasts */
+#toasts { position: fixed; top: 14px; right: 14px; display: flex; flex-direction: column; gap: 8px; z-index: 50; }
+.toast { background: var(--surface-1); border: 1px solid var(--border); border-left: 3px solid var(--text-muted);
+  border-radius: 8px; padding: 8px 12px; font-size: 13px; box-shadow: var(--shadow); min-width: 180px; max-width: 320px;
+  animation: slidein .25s ease-out; }
+.toast.out { animation: slideout .3s ease-in forwards; }
+.toast b { font-variant-numeric: tabular-nums; }
+.toast.tp { border-left-color: var(--good); } .toast.sl { border-left-color: var(--critical); }
+.toast.trail { border-left-color: var(--info); } .toast.open { border-left-color: var(--accent, var(--series-1)); }
+.toast.fill { border-left-color: var(--warn); }
+.toast .k { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--text-muted); }
+@keyframes slidein { from { opacity: 0; transform: translateX(24px); } to { opacity: 1; transform: none; } }
+@keyframes slideout { to { opacity: 0; transform: translateX(24px); height: 0; padding: 0; margin: 0; } }
+@media (max-width: 520px) { #toasts { left: 10px; right: 10px; } .toast { max-width: none; } }
 </style>
 </head>
 <body>
+<div id="toasts"></div>
 <main>
   <header>
     <h1>autotr</h1>
     <span class="sub" id="strategy"></span>
     <span class="pill" id="status"><span class="dot"></span><span>Loading…</span></span>
     <span class="sub" id="updated"></span>
+    <span class="spacer"></span>
+    <button class="btn" id="pause" title="Pause / resume live updates">⏸ Pause</button>
+    <button class="btn" id="refreshNow" title="Refresh now">↻</button>
   </header>
   <div id="error" class="card" style="display:none"></div>
   <div class="tiles" id="tiles"></div>
   <section class="card">
-    <h2>Equity</h2>
+    <div class="head"><h2>Equity</h2></div>
     <div class="chart-wrap" id="chart"></div>
   </section>
+  <section class="card" id="pendingCard" style="display:none">
+    <div class="head"><h2>Limit orders</h2><span class="count" id="pendingCount"></span></div>
+    <div id="pending"></div>
+  </section>
   <section class="card">
-    <h2>Open positions</h2>
+    <div class="head"><h2>Open positions</h2><span class="count" id="posCount"></span></div>
     <div class="scroll" id="positions"></div>
   </section>
   <section class="card">
-    <h2>Closed trades</h2>
+    <div class="head"><h2>Closed trades</h2><span class="count" id="tradesCount"></span></div>
     <div class="scroll" id="trades"></div>
   </section>
-  <footer>Paper trading only: simulated orders on real Binance prices, no real money. Refreshes every __REFRESH__ s.</footer>
+  <footer>Paper trading only: simulated orders on real Binance prices, no real money. Live updates every __REFRESH__ s.</footer>
 </main>
 <script>
 const $ = id => document.getElementById(id);
@@ -298,12 +392,55 @@ const esc = s => String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">"
 const usd = (v, sign) => (sign && v > 0 ? "+" : v < 0 ? "−" : "") + "$" + Math.abs(v).toFixed(2);
 const pct = (v, sign) => (sign && v > 0 ? "+" : v < 0 ? "−" : "") + Math.abs(v).toFixed(2) + "%";
 const cls = v => v > 0 ? "pos" : v < 0 ? "neg" : "";
-const price = v => v >= 100 ? v.toFixed(2) : v >= 1 ? v.toFixed(4) : v.toPrecision(4);
+const price = v => v == null ? "—" : v >= 100 ? v.toFixed(2) : v >= 1 ? v.toFixed(4) : v.toPrecision(4);
 const dt = ts => new Date(ts).toLocaleString(undefined, {month: "short", day: "numeric", hour: "2-digit", minute: "2-digit"});
 const ago = ms => { const s = Math.max(0, Math.round(ms / 1000));
   return s < 90 ? s + " s" : s < 5400 ? Math.round(s / 60) + " min" : s < 172800 ? Math.round(s / 3600) + " h" : Math.round(s / 86400) + " days"; };
-const until = ms => { const m = Math.max(0, Math.round(ms / 60000)); return m < 60 ? m + " min" : Math.floor(m / 60) + " h " + (m % 60) + " min"; };
-let last = null;
+const dur = ms => { const s = Math.max(0, Math.ceil(ms / 1000)); return s < 60 ? s + "s" : Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0"); };
+const sideHtml = s => s === "LONG" ? `<span class="side long">▲ long</span>` : `<span class="side short">▼ short</span>`;
+const confHtml = v => `<span class="conf"><span class="confbar"><i style="width:${Math.round((v || 0) * 100)}%"></i></span>${Math.round((v || 0) * 100)}%</span>`;
+const cad = s => s < 60 ? "every " + (s % 1 ? s.toFixed(1) : s) + "s" : s < 3600 ? "every " + Math.round(s / 60) + " min" : "every " + (s / 3600) + " h";
+const REASON = {take_profit: ["b-tp", "take profit"], trailing_stop: ["b-trail", "trailing stop"],
+  stop_loss: ["b-sl", "stop loss"], time_stop: ["b-time", "time stop"], liquidation: ["b-liq", "liquidation"], manual: ["b-time", "manual"]};
+function reasonBadge(r) { const base = String(r).replace(/ \(gap\)$/, ""); const [c, label] = REASON[base] || ["b-time", base.replace(/_/g, " ")];
+  return `<span class="badge ${c}">${label}${/\(gap\)/.test(r) ? " (gap)" : ""}</span>`; }
+
+let prev = null;
+const flashRows = new Set(), flashLadders = new Set();
+
+function toast(kind, k, msg) {
+  const el = document.createElement("div");
+  el.className = "toast " + kind;
+  el.innerHTML = `<div class="k">${k}</div>${msg}`;
+  const box = $("toasts");
+  box.appendChild(el);
+  while (box.children.length > 6) box.firstChild.remove();
+  setTimeout(() => { el.classList.add("out"); setTimeout(() => el.remove(), 320); }, 4500);
+}
+
+function diffEvents(d) {
+  if (!prev) return;   // first load: don't toast the whole backlog
+  const pm = Object.fromEntries((prev.positions || []).map(p => [p.symbol, p]));
+  for (const p of d.positions) {
+    const w = pm[p.symbol];
+    if (!w) { toast("open", "position opened", `${sideHtml(p.side)} <b>${esc(p.symbol)}</b> @ ${price(p.entry_price)}`); flashRows.add(p.symbol); }
+    else if (p.fills > w.fills) { toast("fill", "rung filled", `<b>${esc(p.symbol)}</b> · ${p.fills}/${p.planned_rungs} filled`); flashRows.add(p.symbol); }
+  }
+  const qm = Object.fromEntries((prev.pending || []).map(q => [q.symbol, q]));
+  for (const q of d.pending || []) {
+    const w = qm[q.symbol];
+    if (!w) { toast("open", "limit ladder placed", `${sideHtml(q.side)} <b>${esc(q.symbol)}</b> · ${q.total} rungs`); flashLadders.add(q.symbol); }
+    else if (q.filled > w.filled) flashLadders.add(q.symbol);
+  }
+  const seen = new Set((prev.trades || []).map(t => t.symbol + ":" + t.exit_ts));
+  for (const t of d.trades) {
+    if (seen.has(t.symbol + ":" + t.exit_ts)) continue;
+    const base = String(t.reason).replace(/ \(gap\)$/, "");
+    const kind = base === "take_profit" ? "tp" : base === "stop_loss" || base === "liquidation" ? "sl"
+      : base === "trailing_stop" ? "trail" : "fill";
+    toast(kind, "closed · " + base.replace(/_/g, " "), `<b>${esc(t.symbol)}</b> ${usd(t.net_pnl, true)} <span class="${cls(t.r)}">(${t.r >= 0 ? "+" : "−"}${Math.abs(t.r).toFixed(2)}R)</span>`);
+  }
+}
 
 function tile(label, value, hint, c) {
   return `<div class="tile"><div class="label">${label}</div><div class="value ${c || ""}">${value}</div>` +
@@ -311,52 +448,83 @@ function tile(label, value, hint, c) {
 }
 
 function render(d) {
-  last = d;
+  diffEvents(d);
+  prev = d;
   $("strategy").textContent = `${d.strategy} · ${d.account_file}`;
   const st = $("status");
   if (!d.account) {
-    st.innerHTML = `<span class="dot" style="background:var(--text-muted)"></span><span>No account yet: start the bot</span>`;
-    $("tiles").innerHTML = tile("Next decision", new Date(d.next_decision).toLocaleTimeString([], {hour: "2-digit", minute: "2-digit"}),
-                                "in " + until(d.next_decision - Date.now()));
+    st.innerHTML = `<span class="dot"></span><span>No account yet — start the bot</span>`;
+    $("tiles").innerHTML = tile("Next decision", d.decision_seconds <= 2 ? "live" : `<span class="cd" data-until="${d.next_decision}"></span>`, cad(d.decision_seconds));
     $("chart").innerHTML = `<div class="empty">Nothing to show until the bot has run.</div>`;
-    $("positions").innerHTML = $("trades").innerHTML = "";
+    $("pendingCard").style.display = "none"; $("positions").innerHTML = $("trades").innerHTML = "";
     return;
   }
-  const a = d.account, m = d.metrics;
-  const showConf = !!d.confidence_sizing;
-  const confPct = v => (v == null ? "" : (v * 100).toFixed(0) + "%");
+  const a = d.account, m = d.metrics, showConf = !!d.confidence_sizing;
   st.innerHTML = d.running
-    ? `<span class="dot" style="background:var(--good)"></span><span>✓ Running</span>`
-    : `<span class="dot" style="background:var(--critical)"></span><span>✕ Not running: no market data for ${ago(d.now - (d.last_update || 0))}</span>`;
+    ? `<span class="dot live"></span><span>Running</span>`
+    : `<span class="dot down"></span><span>Not running — no data for ${ago(d.now - (d.last_update || 0))}</span>`;
   $("updated").textContent = d.last_update ? "last candle " + ago(Date.now() - d.last_update) + " ago" : "";
 
   $("tiles").innerHTML =
-    tile("Equity", usd(a.equity), "started with " + usd(a.starting_balance) + " · " + dt(a.since)) +
+    tile("Equity", usd(a.equity), "started " + usd(a.starting_balance)) +
     tile("Return", pct(a.return_pct, true), "incl. open positions", cls(a.return_pct)) +
-    tile("Open P&amp;L", usd(a.unrealized, true), d.positions.length + " open" + (d.pending_entries ? ", " + d.pending_entries + " pending" : ""), cls(a.unrealized)) +
-    tile("Closed trades", m.trades, m.trades ? (m.win_rate * 100).toFixed(0) + "% win · " + usd(m.net_pnl, true) + " net" : "none yet") +
+    tile("Open P&amp;L", usd(a.unrealized, true), d.positions.length + " open · " + (d.pending_entries || 0) + " working", cls(a.unrealized)) +
+    tile("Win rate", m.trades ? (m.win_rate * 100).toFixed(0) + "%" : "—", m.trades ? m.trades + " trades · " + usd(m.net_pnl, true) + " net" : "none yet") +
     tile("Max drawdown", pct(-m.max_drawdown_pct), "from peak equity") +
-    tile("Next decision", new Date(d.next_decision).toLocaleTimeString([], {hour: "2-digit", minute: "2-digit"}),
-         "in " + until(d.next_decision - Date.now()) + " · every " + (d.decision_every_min / 60) + " h");
+    tile("Next decision", d.decision_seconds <= 2 ? "live" : `<span class="cd" data-until="${d.next_decision}"></span>`, cad(d.decision_seconds));
 
   drawChart(d.equity, a.starting_balance);
 
-  $("positions").innerHTML = d.positions.length ? `<table><tr><th>Coin</th><th class="l">Side</th><th>Qty</th><th>Entry</th>
-    <th>Last</th><th>Stop</th>${showConf ? "<th>Conf</th>" : ""}<th>P&amp;L</th><th>Opened</th></tr>` + d.positions.map(p => `<tr>
-    <td>${esc(p.symbol)}</td><td class="l">${p.side === "LONG" ? "▲ long" : "▼ short"}</td><td>${p.qty}</td>
-    <td>${price(p.entry_price)}</td><td>${price(p.last_price)}</td><td>${price(p.stop)}</td>
-    ${showConf ? `<td>${confPct(p.conf)}</td>` : ""}
-    <td class="${cls(p.upnl)}">${usd(p.upnl, true)}</td><td>${dt(p.entry_ts)}</td></tr>`).join("") + `</table>`
-    : `<div class="empty">No open positions.</div>`;
+  const pend = d.pending || [];
+  $("pendingCard").style.display = pend.length ? "" : "none";
+  $("pendingCount").textContent = pend.length ? pend.length + " working" : "";
+  $("pending").innerHTML = pend.length ? `<div class="ladders">` + pend.map(q => {
+    const tq = q.rungs.reduce((s, r) => s + r.qty, 0) || 1;
+    const rungs = q.rungs.map(r => `<div class="rung ${r.filled ? "filled" : "wait"}"><span class="mark"></span>
+      <span>${r.market ? "market" : price(r.price)} <span class="wgt">${Math.round(r.qty / tq * 100)}%</span></span>
+      <span class="dist">${r.filled ? "filled" : r.dist_pct == null ? "" : (r.dist_pct >= 0 ? "+" : "") + r.dist_pct.toFixed(2) + "%"}</span></div>`).join("");
+    return `<div class="ladder" data-sym="${esc(q.symbol)}"><div class="lh"><span class="sym">${esc(q.symbol)}</span>${sideHtml(q.side)}
+      <span class="meta">${q.filled}/${q.total} filled</span></div>${rungs}
+      <div class="lbar"><i style="width:${q.total ? Math.round(q.filled / q.total * 100) : 0}%"></i></div>
+      <div class="lfoot"><span>stop ${price(q.stop)}</span><span>target ${price(q.take_profit)}</span>
+      ${showConf ? `<span>conf ${Math.round((q.conf || 0) * 100)}%</span>` : ""}
+      <span>expires <span class="cd" data-until="${q.expiry_ts || 0}"></span></span></div></div>`;
+  }).join("") + `</div>` : "";
+  if (flashLadders.size) document.querySelectorAll("#pending .ladder[data-sym]").forEach(l => { if (flashLadders.has(l.dataset.sym)) l.classList.add("flash"); });
+  flashLadders.clear();
 
-  $("trades").innerHTML = d.trades.length ? `<table><tr><th>Coin</th><th class="l">Side</th><th>Opened</th><th>Closed</th>
-    <th>Entry</th><th>Exit</th>${showConf ? "<th>Conf</th>" : ""}<th>Net</th><th>R</th><th class="l">Exit reason</th></tr>` + d.trades.map(t => `<tr>
-    <td>${esc(t.symbol)}</td><td class="l">${t.side === "LONG" ? "▲ long" : "▼ short"}</td><td>${dt(t.entry_ts)}</td>
+  $("posCount").textContent = d.positions.length ? d.positions.length + " open" : "";
+  $("positions").innerHTML = d.positions.length ? `<table><thead><tr><th class="l">Coin</th><th class="l">Side</th><th>Qty</th>
+    <th>Entry</th><th>Last</th><th>Stop</th><th>Target</th><th>Fills</th>${showConf ? "<th>Conf</th>" : ""}<th>P&amp;L</th><th>Time&nbsp;stop</th></tr></thead><tbody>`
+    + d.positions.map(p => `<tr data-sym="${esc(p.symbol)}"><td class="l">${esc(p.symbol)}</td><td class="l">${sideHtml(p.side)}</td><td>${p.qty}</td>
+    <td>${price(p.entry_price)}</td><td>${price(p.last_price)}</td>
+    <td>${price(p.stop)}${p.trailed ? ' <span class="lock" title="trailing stop active">🔒</span>' : ""}</td>
+    <td>${price(p.take_profit)}</td><td>${p.fills}/${p.planned_rungs}</td>
+    ${showConf ? `<td>${confHtml(p.conf)}</td>` : ""}
+    <td class="${cls(p.upnl)}">${usd(p.upnl, true)} <span class="cd">(${p.upnl_r >= 0 ? "+" : "−"}${Math.abs(p.upnl_r).toFixed(2)}R)</span></td>
+    <td><span class="cd" data-until="${p.time_stop_ts || 0}"></span></td></tr>`).join("") + `</tbody></table>`
+    : `<div class="empty">No open positions.</div>`;
+  if (flashRows.size) document.querySelectorAll("#positions tr[data-sym]").forEach(r => { if (flashRows.has(r.dataset.sym)) r.classList.add("flash-up"); });
+  flashRows.clear();
+
+  $("tradesCount").textContent = m.trades ? m.trades + " total" : "";
+  $("trades").innerHTML = d.trades.length ? `<table><thead><tr><th class="l">Coin</th><th class="l">Side</th><th>Opened</th><th>Closed</th>
+    <th>Entry</th><th>Exit</th>${showConf ? "<th>Conf</th>" : ""}<th>Net</th><th>R</th><th class="l">Exit</th></tr></thead><tbody>`
+    + d.trades.map(t => `<tr><td class="l">${esc(t.symbol)}</td><td class="l">${sideHtml(t.side)}</td><td>${dt(t.entry_ts)}</td>
     <td>${dt(t.exit_ts)}</td><td>${price(t.entry_price)}</td><td>${price(t.exit_price)}</td>
-    ${showConf ? `<td>${confPct(t.conf)}</td>` : ""}
-    <td class="${cls(t.net_pnl)}">${usd(t.net_pnl, true)}</td><td>${t.r >= 0 ? "+" : "−"}${Math.abs(t.r).toFixed(2)}</td>
-    <td class="l">${esc(t.reason)}</td></tr>`).join("") + `</table>`
-    : `<div class="empty">No closed trades yet. Expect about one a day.</div>`;
+    ${showConf ? `<td>${Math.round((t.conf || 0) * 100)}%</td>` : ""}
+    <td class="${cls(t.net_pnl)}">${usd(t.net_pnl, true)}</td><td class="${cls(t.r)}">${t.r >= 0 ? "+" : "−"}${Math.abs(t.r).toFixed(2)}</td>
+    <td class="l">${reasonBadge(t.reason)}</td></tr>`).join("") + `</tbody></table>`
+    : `<div class="empty">No closed trades yet.</div>`;
+  tick();
+}
+
+function tick() {
+  const now = Date.now();
+  document.querySelectorAll(".cd[data-until]").forEach(e => {
+    const ts = +e.dataset.until;
+    e.textContent = !ts ? "—" : ts - now <= 0 ? "now" : dur(ts - now);
+  });
 }
 
 function drawChart(pts, startBal) {
@@ -413,7 +581,9 @@ function drawChart(pts, startBal) {
   hit.addEventListener("mouseleave", leave); hit.addEventListener("touchend", leave);
 }
 
-async function refresh() {
+let paused = false;
+async function refresh(force) {
+  if (paused && !force) return;
   try {
     const r = await fetch("api/status", {cache: "no-store"});
     if (!r.ok) throw new Error("HTTP " + r.status);
@@ -426,9 +596,12 @@ async function refresh() {
     $("error").textContent = "Could not load the account: " + e.message;
   }
 }
-refresh();
+$("pause").onclick = () => { paused = !paused; $("pause").textContent = paused ? "▶ Resume" : "⏸ Pause"; if (!paused) refresh(true); };
+$("refreshNow").onclick = () => refresh(true);
+refresh(true);
 setInterval(refresh, __REFRESH_MS__);
-let rt; addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(() => last && render(last), 150); });
+setInterval(tick, 500);   // smooth countdowns between polls
+let rt; addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(() => prev && render(prev), 150); });
 </script>
 </body>
 </html>

@@ -129,6 +129,7 @@ class LiveCfg(BaseModel):
     ws_public_path: str = "/public"
     stream_timeout_s: float = 150
     ui_refresh_seconds: float = 3.0   # web dashboard poll interval (how often the page re-fetches)
+    decision_seconds: float = 0.0     # dashboard: seconds between decisions (0 = derive from entry_tf_minutes)
     snapshot_seconds: float = 3.0     # live mode: how often open-position marks are persisted for the
                                       # dashboard while a position is open (0 = only the per-minute save)
 

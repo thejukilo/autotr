@@ -23,6 +23,8 @@ universe:
 live:
   db_path: data/live_scalp1s.db   # its own paper account
   snapshot_seconds: 2
+  decision_seconds: 1             # dashboard: decisions happen every second
+  ui_refresh_seconds: 2           # poll the dashboard twice a second-ish
 research: {windows: scalp}
 exchange: {taker_fee: 0.0005, maker_fee: 0.0002, slippage_bps: 5.0, leverage: 10}
 scanner: {rank_by: change_24h, top_n: 15, min_quote_volume_24h: 20000000, rescan_minutes: 5}
