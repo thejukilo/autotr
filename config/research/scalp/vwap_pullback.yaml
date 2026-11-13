@@ -1,0 +1,16 @@
+# Round 1: trend-of-day pullback to the VWAP24/EMA zone, ladder in, maker TP at the 2h high (scalp_vwap_pullback.py; params.market: true = market twin)
+universe: {source: movers}
+research: {windows: scalp}
+exchange: {taker_fee: 0.0005, maker_fee: 0.0002, slippage_bps: 5.0}
+scanner: {rank_by: change_24h, top_n: 8, min_quote_volume_24h: 50000000, rescan_minutes: 15}
+risk: {risk_per_trade: 0.01, max_positions: 3, max_trades_per_day: 40, daily_loss_limit: 0.06}
+strategy:
+  name: scalp_vwap_pullback
+  entry_tf_minutes: 5
+  structure_tf_minutes: 15
+  structure_history_bars: 96
+  entry_history_bars: 288
+  time_stop_minutes: 240
+  cooldown_minutes: 60
+  ladder_expiry_bars: 6
+  params: {min_change: 0.15, ema_f: 20, ema_s: 50, s_ema: 20, new_high_bars: 24, hh_bars: 24, pull_atr: 1.5, r1: 0.5, r2: 1.25, vwap_buf: 0.002, stop_atr: 1.5, vwap_stop_atr: 0.5, min_stop: 0.015, max_stop: 0.06, tp_atr: 0.25, min_rr: 1.0, be_r: 1.0, max_per_day: 2, market: false}

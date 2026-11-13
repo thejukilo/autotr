@@ -1,0 +1,16 @@
+# Round 1: post-blow-off failure short, first 15m close below VWAP24, sell the retest with limits (scalp_vwap_fail_short.py)
+universe: {source: movers}
+research: {windows: scalp}
+exchange: {taker_fee: 0.0005, maker_fee: 0.0002, slippage_bps: 5.0}
+scanner: {rank_by: change_24h, top_n: 8, min_quote_volume_24h: 50000000, rescan_minutes: 15}
+risk: {risk_per_trade: 0.01, max_positions: 3, max_trades_per_day: 40, daily_loss_limit: 0.06}
+strategy:
+  name: scalp_vwap_fail_short
+  entry_tf_minutes: 15
+  structure_tf_minutes: 60
+  structure_history_bars: 24
+  entry_history_bars: 96
+  time_stop_minutes: 360
+  cooldown_minutes: 240
+  ladder_expiry_bars: 4
+  params: {min_change: 0.25, blowoff: 1.12, hi_age_min: 8, hi_age_max: 64, vol_mult: 0.0, vol_n: 20, rung_atr: 0.5, stop_bars: 8, stop_atr: 1.5, min_stop: 0.015, max_stop: 0.12, tp_r: 2.0, be_r: 1.0, max_per_day: 1, market: false, mirror: false}

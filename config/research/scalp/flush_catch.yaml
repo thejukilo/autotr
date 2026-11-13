@@ -1,0 +1,16 @@
+# Round 1: liquidation-flush wick catch, trend-aligned, maker in / maker TP (src/autotr/strategy/research/scalp_flush_catch.py)
+universe: {source: movers}
+research: {windows: scalp}
+exchange: {taker_fee: 0.0005, maker_fee: 0.0002, slippage_bps: 5.0}
+scanner: {rank_by: change_24h, top_n: 8, min_quote_volume_24h: 50000000, rescan_minutes: 15}
+risk: {risk_per_trade: 0.01, max_positions: 3, max_trades_per_day: 40, daily_loss_limit: 0.06}
+strategy:
+  name: scalp_flush_catch
+  entry_tf_minutes: 1
+  structure_tf_minutes: 5
+  structure_history_bars: 288
+  entry_history_bars: 240
+  time_stop_minutes: 90
+  cooldown_minutes: 60
+  ladder_expiry_bars: 10
+  params: {min_change: 0.10, both: false, win: 5, min_drop_pct: 0.03, atr_mult: 6.0, atr_n: 60, vol_mult: 4.0, vol_base: 120, new_extreme: 240, close_frac: 0.4, r1: 0.15, r2: 0.35, stop_d: 0.40, stop_pct: 0.015, max_stop: 0.06, tp_frac: 0.5, be_after_min: 30, be_d: 0.25, max_per_day: 2}

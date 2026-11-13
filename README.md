@@ -83,6 +83,25 @@ trailing stop, a 5-hour time limit and a 30-minute cooldown per coin. It has its
 dashboard). **This version was not validated by the research.** A 14-day backtest (Oct 28 – Nov 10
 2026) lost 32%: about 30 trades a day, and $34.56 of fees against $2.57 of gross profit.
 
+### Paper trading the top-movers scalper (unvalidated, failed its holdout)
+
+```bash
+uv run autotr live --replay --config config/scalp.yaml --start 2026-11-05 --end 2026-11-06  # quick offline check
+uv run autotr live   --config config/scalp.yaml           # terminal 1: the bot (Ctrl+C to stop, resumes on restart)
+uv run autotr web    --config config/scalp.yaml           # terminal 2: dashboard on http://localhost:8080
+uv run autotr status --config config/scalp.yaml           # or a quick summary in the terminal
+uv run autotr live   --config config/scalp.yaml --reset   # start over with $100
+```
+
+The "ignition" long from the scalping search (see "Scalping search (Nov 2026)" below). It scans the 150
+highest-volume USDT perpetuals, keeps the 8 biggest 24h movers (≥ $50M volume), and buys at market on a 5m close
+when a coin already up ≥ 12% today makes a fresh +6% hour on ≥ 4× volume. Stop ≥ 2.5% away, 3 ATR(5m) trailing stop
+after +1R, no target, 10-hour time limit, one entry per coin per day, no entries 18–24 UTC, 1% risk per trade.
+Expect about 2 trades a day. It has its own paper account (`data/live_scalp.db`); use `--port 8081` for the
+dashboard if another one already runs. **It lost in both locked holdout windows (−15.7%, −20.6%).** Run it only
+to watch the signal forward on paper, not with real money. The replay needs the movers data
+(`autotr download-movers`); live mode does not.
+
 ### Web dashboard
 
 ```bash
@@ -236,6 +255,40 @@ and about 40 configurations. The data was split so that ideas are never judged o
   - The holdout is now used up, so the next honest test is paper trading forward from 2026-11-11.
 
 Full details: [docs/RESEARCH_LOG.md](docs/RESEARCH_LOG.md).
+
+### Scalping search (Nov 2026)
+
+**No winner.** The goal was to scalp (5m entries, holds of minutes to hours) the day's top movers on Binance
+USDⓈ-M perps, with real fees (0.05% taker / 0.02% maker + 5 bps slippage). The universe was each day's top 20
+coins by |daily change|, delisted coins included. The process was the same as above: 3 rounds, 17 configs, 7 strategy
+families, research (SR) / validation (SV) windows, and 3 finalists written down before a locked holdout (SH) run once.
+**All three finalists lost in both holdout windows.**
+
+| Config | SR1 | SR2 | SV1 | SV2 | **SH1** | **SH2** |
+|---|---|---|---|---|---|---|
+| Period | Sep 2025 | Feb 2026 | Dec 2025 | May 2026 | Aug–Sep 2026 | Oct–Nov 2026 |
+| `ignition_mkt_r2` (finalist #1) | +46.1% PF 2.29 | +3.2% PF 1.16 | +12.0% PF 1.57 | +5.5% PF 1.23 | **−15.7% PF 0.49** | **−20.6% PF 0.31** |
+| `ignition_mkt_fresh_r3` (#2) | +11.0% PF 1.75 | +18.1% PF 2.57 | +19.5% PF 3.18 | −1.8% PF 0.92 | **−7.7% PF 0.46** | **−8.0% PF 0.12** |
+| `ignition_r2` (#3, limit ladder) | +2.5% PF 1.10 | +6.8% PF 1.47 | +7.2% PF 1.57 | −4.4% PF 0.70 | **−8.8% PF 0.45** | **−13.0% PF 0.43** |
+| `vwap_pullback_r2` (not a finalist) | +6.7% PF 1.28 | +1.9% PF 1.06 | +8.0% PF 1.27 | +1.1% PF 1.03 | – | – |
+| `xs_intraday` | +10.1% PF 1.30 | −12.3% PF 0.72 | +16.1% PF 1.43 | +10.8% PF 1.35 | – | – |
+| `coil_break_r2` | +36.8% PF 3.89 | −6.7% PF 0.63 | +24.6% PF 3.16 | −2.6% PF 0.87 | – | – |
+| `base_scalper` (1m baseline) | −53.3% PF 0.73 | −48.9% PF 0.75 | −36.1% | −56.5% PF 0.68 | – | – |
+
+Each window is 3 weeks, starting from $100. The other 10 configs (flush catch, VWAP failure short, session ORB, …) were
+dropped earlier.
+
+**Key lessons**
+- **Fees were solved, the signal was not.** With stops ≥ 2.5% and ~2 trades a day, fees fell to ~0.03R per trade.
+  The holdout losses (−0.3 to −0.66R per trade) are almost all price losses.
+- **Buying strength in movers is a tail bet.** 90%+ of trades end on the stop. Profit depends on one or two +10–20R
+  runaway coins per window. The research windows had them and the holdout did not (best trade +4.3R).
+- **Filters chosen on research trades didn't generalise** (24h-change cap, hour filter). Limit ladders on movers fill
+  mostly on the losers.
+- **Fills are simulated on 1m bars.** Live slippage on small, fast coins would make results worse, not better.
+
+`config/scalp.yaml` (finalist #1) is set up for paper trading only, clearly labelled as unvalidated.
+Full details: [docs/SCALP_RESEARCH_LOG.md](docs/SCALP_RESEARCH_LOG.md).
 
 ### Original strategies
 

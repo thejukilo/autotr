@@ -1,0 +1,16 @@
+# Round 2 (new, researcher #7): cross-sectional momentum inside the mover set, rebalance every 4h, market entry, chandelier trail (scalp_xs_intraday.py)
+universe: {source: movers}
+research: {windows: scalp}
+exchange: {taker_fee: 0.0005, maker_fee: 0.0002, slippage_bps: 5.0}
+scanner: {rank_by: change_24h, top_n: 8, min_quote_volume_24h: 50000000, rescan_minutes: 15}
+risk: {risk_per_trade: 0.01, max_positions: 3, max_trades_per_day: 40, daily_loss_limit: 0.06}
+strategy:
+  name: scalp_xs_intraday
+  entry_tf_minutes: 15
+  structure_tf_minutes: 60
+  structure_history_bars: 24
+  entry_history_bars: 96
+  time_stop_minutes: 240
+  cooldown_minutes: 240
+  ladder_expiry_bars: 5
+  params: {lb: 16, every_h: 4, k: 1, min_change: 0.10, min_qv: 50000000, min_coins: 4, stop_atr: 3.0, min_stop: 0.02, trail: 3.0, vwap_filter: true, max_per_day: 2, longs: true, shorts: true}

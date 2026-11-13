@@ -1,0 +1,22 @@
+# Round 1 baseline: confluence (optimized-2026-11 settings: score>=4, confirm hold, 60/40 ladder) with 15m x 96 structure (1 day)
+universe: {source: movers}
+research: {windows: scalp}
+exchange: {taker_fee: 0.0005, maker_fee: 0.0002, slippage_bps: 5.0}
+scanner: {rank_by: change_24h, top_n: 8, min_quote_volume_24h: 50000000, rescan_minutes: 15}
+risk: {risk_per_trade: 0.01, max_positions: 3, max_trades_per_day: 40, daily_loss_limit: 0.06}
+strategy:
+  name: confluence
+  entry_tf_minutes: 5
+  structure_tf_minutes: 15
+  structure_history_bars: 96
+  time_stop_minutes: 90
+  cooldown_minutes: 15
+  ladder_expiry_bars: 6
+  min_score: 4.0
+  confirm_hold: true
+  ladder_weights: [0.6, 0.4]
+  min_stop_atr5: 1.5
+  rsi_overbought: 75
+  rsi_oversold: 25
+  take_profit_r: 2.0
+  trend_filter: true

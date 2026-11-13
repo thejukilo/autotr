@@ -1,0 +1,16 @@
+# Round 2: ignition, longs only, no signals 18-24 UTC, time stop 180 -> 600 min; MARKET-entry twin of ignition_r2 (measures ladder adverse selection) (scalp_ignition.py)
+universe: {source: movers}
+research: {windows: scalp}
+exchange: {taker_fee: 0.0005, maker_fee: 0.0002, slippage_bps: 5.0}
+scanner: {rank_by: change_24h, top_n: 8, min_quote_volume_24h: 50000000, rescan_minutes: 15}
+risk: {risk_per_trade: 0.01, max_positions: 3, max_trades_per_day: 40, daily_loss_limit: 0.06}
+strategy:
+  name: scalp_ignition
+  entry_tf_minutes: 5
+  structure_tf_minutes: 15
+  structure_history_bars: 96
+  entry_history_bars: 288
+  time_stop_minutes: 600
+  cooldown_minutes: 180
+  ladder_expiry_bars: 3
+  params: {ret_n: 12, min_ret: 0.06, vol_mult: 4.0, min_change: 0.12, r1: 0.5, r2: 1.0, stop_atr: 2.0, min_stop: 0.025, trail: 3.0, trail_after_r: 1.0, max_per_day: 1, longs: true, shorts: false, skip_hours: [18, 19, 20, 21, 22, 23], market: true}

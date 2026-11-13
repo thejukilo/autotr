@@ -1,0 +1,16 @@
+# Round 1: opening-range breakout at 00:00 and 13:30 UTC on movers, market entry, chandelier trail (scalp_session_orb.py)
+universe: {source: movers}
+research: {windows: scalp}
+exchange: {taker_fee: 0.0005, maker_fee: 0.0002, slippage_bps: 5.0}
+scanner: {rank_by: change_24h, top_n: 8, min_quote_volume_24h: 50000000, rescan_minutes: 15}
+risk: {risk_per_trade: 0.01, max_positions: 3, max_trades_per_day: 40, daily_loss_limit: 0.06}
+strategy:
+  name: scalp_session_orb
+  entry_tf_minutes: 5
+  structure_tf_minutes: 15
+  structure_history_bars: 96
+  entry_history_bars: 288
+  time_stop_minutes: 360
+  cooldown_minutes: 15
+  ladder_expiry_bars: 5
+  params: {sessions: [0, 810], or_bars: 6, min_h: 0.01, max_h: 0.05, vol_mult: 2.0, min_change: 0.10, window_min: 120, mid_if: 0.04, min_stop: 0.015, trail_atr: 3.0, trail_after_r: 1.0}

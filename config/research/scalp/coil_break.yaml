@@ -1,0 +1,16 @@
+# Round 1: post-move coil (flag) breakout, market entry, chandelier trail, no target (scalp_coil_break.py)
+universe: {source: movers}
+research: {windows: scalp}
+exchange: {taker_fee: 0.0005, maker_fee: 0.0002, slippage_bps: 5.0}
+scanner: {rank_by: change_24h, top_n: 8, min_quote_volume_24h: 50000000, rescan_minutes: 15}
+risk: {risk_per_trade: 0.01, max_positions: 3, max_trades_per_day: 40, daily_loss_limit: 0.06}
+strategy:
+  name: scalp_coil_break
+  entry_tf_minutes: 15
+  structure_tf_minutes: 60
+  structure_history_bars: 24
+  entry_history_bars: 96
+  time_stop_minutes: 360
+  cooldown_minutes: 120
+  ladder_expiry_bars: 5
+  params: {min_change: 0.20, coil_n: 12, coil_atr: 3.5, coil_move_frac: 0.35, move_lb: 96, coil_pos: 0.6, brk_atr: 0.1, vol_mult: 1.5, vol_n: 20, stop_buf: 0.2, wide: 0.06, min_stop: 0.02, max_stop: 0.07, trail: 3.0, trail_tight: 2.0, tight_after_r: 1.5, max_per_day: 1}
