@@ -1,0 +1,46 @@
+# Scalp TEST, 1-MINUTE decisions — the fastest cadence Binance perps allow. PAPER ONLY.
+#
+# *** NOT A STRATEGY. NOT VALIDATED. NOT PROFITABLE. ***
+# Same idea as config/scalp_test.yaml but it decides every 1 minute instead of every 5. One minute is
+# the floor: Binance USDⓈ-M futures klines have no sub-minute interval (30s/1s return "Invalid
+# interval"), and warm-up, change_24h and the indicators all need historical 1m bars. This is the
+# most fee-sensitive, noisiest setup of all — the research found the faster you scalp, the more fees
+# win — so run it only to watch the engine react quickly on paper.
+#
+# Note: exits already react in real time regardless of this setting — in live mode the stop, target
+# and liquidation are checked on every bookTicker quote (sub-second). This knob only changes how often
+# NEW ENTRIES are considered and how often the trailing stop is re-tightened (now every minute).
+#
+# Retuned from the 5m version so the time windows still make sense at 1m, and the ATR-based offsets
+# are scaled up (ATR(1m) is ~2x smaller than ATR(5m)):
+#   entry_tf 5m -> 1m          decide every minute; trailing stop updated every minute
+#   ret_n 2 -> 10              impulse still measured over ~10 min
+#   entry_history_bars 12 -> 60   "new high/low" still over ~60 min
+#   r1 0.3->0.7, r2 1.5->3.0, stop_atr 1.0->2.0, trail 1.5->3.0   (ATR(1m) units; min_stop floors it)
+#   ladder_expiry_bars 3 -> 15    limit rungs still get ~15 min to fill
+#   time_stop 20m, cooldown 3m    unchanged (absolute minutes)
+#
+#   Quick offline check:   uv run autotr live --replay --config config/scalp_test_1m.yaml --start 2026-11-05 --end 2026-11-06
+#   Live paper trading:    uv run autotr live  --config config/scalp_test_1m.yaml --reset
+#   Dashboard:             uv run autotr web   --config config/scalp_test_1m.yaml --port 8083
+universe:
+  source: movers
+  live_use_symbols: false
+  live_candidates: 150
+live:
+  db_path: data/live_scalptest_1m.db   # its own paper account — run it next to the 5m version
+research: {windows: scalp}
+exchange: {taker_fee: 0.0005, maker_fee: 0.0002, slippage_bps: 5.0}
+scanner: {rank_by: change_24h, top_n: 20, min_quote_volume_24h: 20000000, rescan_minutes: 15}
+risk: {risk_per_trade: 0.0025, max_positions: 8, max_trades_per_day: 1000, daily_loss_limit: 0.9}
+strategy:
+  name: scalp_ignition
+  entry_tf_minutes: 1         # decide every minute (the finest Binance perps allow)
+  structure_tf_minutes: 15
+  structure_history_bars: 96
+  entry_history_bars: 60      # ~60 min "new high/low" window (in 1m bars)
+  time_stop_minutes: 20
+  cooldown_minutes: 3
+  ladder_expiry_bars: 15      # ~15 min for the limit rungs to fill (in 1m bars)
+  # 3-rung 20/30/50 ladder, offsets scaled for ATR(1m). Stop 2.0 ATR(1m) below the deepest rung.
+  params: {ret_n: 10, min_ret: 0.0, vol_mult: 0.0, min_change: 0.0, min_bars: 50, r1: 0.7, r2: 3.0, rungs: 3, weights: [0.2, 0.3, 0.5], stop_atr: 2.0, min_stop: 0.004, trail: 3.0, trail_after_r: 0.5, max_per_day: 400, longs: true, shorts: true, skip_hours: [], market: false}
