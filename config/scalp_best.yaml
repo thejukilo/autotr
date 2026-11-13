@@ -1,0 +1,46 @@
+# BEST config from the Nov 2026 scalp parameter sweep. PAPER ONLY. Still marginal — read this.
+#
+# This is the one variant that survived out-of-sample in the sweep: a SELECTIVE momentum-ignition
+# entry (only strong pushes) with a WIDE exit (let winners run to a +2% target or a loose trail).
+# It is NOT a high-frequency scalper — selectivity is exactly what makes it work, because fees kill
+# high frequency. Expect ~8 trades/day, not 150.
+#
+# Backtest across the scalp research + validation windows (survivorship-bias-free top-mover universe):
+#     SR1 2025-09  -1.3%  |  SR2 2026-02  +18.5%  |  SV1 2025-12  +11.5%  |  SV2 2026-05  -14.7%
+#   avg R positive in all four; profit factor 0.87-1.13; ~8 trades/day; win rate ~55%.
+# Honest read: a THIN, REGIME-DEPENDENT edge. It made money in 3 of 4 three-week windows and lost in
+# one. Positive on average, but it will have losing weeks/months. It is not a money printer, and past
+# backtest results do not guarantee live performance. Re-validate before trusting real money (never
+# a given with this).
+#   - Known lever: confidence sizing (on below) adds variance; set confidence_sizing: false (flat
+#     risk) if you want steadier equity at the cost of some upside.
+#
+#   Re-validate (research + validation windows):  uv run autotr research-eval -c config/scalp_best.yaml
+#   Backtest one window + report:                 uv run autotr backtest --start 2026-02-02 --end 2026-02-22 -c config/scalp_best.yaml
+#   Live paper trading:                           uv run autotr live  --config config/scalp_best.yaml --reset
+#   Dashboard:                                    uv run autotr web   --config config/scalp_best.yaml --port 8085
+universe:
+  source: movers
+  live_use_symbols: false
+  live_candidates: 150
+live:
+  db_path: data/live_scalpbest.db
+research: {windows: scalp}
+exchange: {taker_fee: 0.0005, maker_fee: 0.0002, slippage_bps: 5.0, leverage: 10}
+scanner: {rank_by: change_24h, top_n: 20, min_quote_volume_24h: 20000000, rescan_minutes: 15}
+risk: {risk_per_trade: 0.0025, max_positions: 8, max_trades_per_day: 1000, daily_loss_limit: 0.9,
+       confidence_sizing: true, conf_risk_min: 0.005, conf_risk_max: 0.02}
+strategy:
+  name: scalp_ignition
+  entry_tf_minutes: 5
+  structure_tf_minutes: 15
+  structure_history_bars: 96
+  entry_history_bars: 12       # "new high/low" over the last ~60 min (12 x 5m)
+  time_stop_minutes: 60        # backstop; the +2% target / loose trail should exit first
+  cooldown_minutes: 3
+  ladder_expiry_bars: 3        # ~15 min for the limit rungs to fill
+  # SELECTIVE entry: only fire on a real ignition — a >=+3% push over 10 min (ret_n 2 x 5m), on >=4x
+  # the baseline hourly volume, when the coin is already >=8% on the day and at a fresh 60-min high.
+  # WIDE exit: +2% take-profit; trail 2.0 ATR(5m) armed only after +1R so winners actually run; stop
+  # 1.0 ATR below the deepest rung, floored 0.4% and capped 1.5%. 3-rung 20/30/50 ladder 0.3->1.5 ATR.
+  params: {ret_n: 2, min_ret: 0.03, vol_mult: 4.0, min_change: 0.08, min_bars: 10, r1: 0.3, r2: 1.5, rungs: 3, weights: [0.2, 0.3, 0.5], stop_atr: 1.0, min_stop: 0.004, max_stop: 0.015, trail: 2.0, trail_after_r: 1.0, take_pct: 0.02, max_per_day: 200, longs: true, shorts: true, skip_hours: [], market: false}
