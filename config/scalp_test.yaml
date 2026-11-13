@@ -1,0 +1,50 @@
+# Scalp TEST — a MAXED-OUT high-frequency scalper, for watching the live engine work.
+#
+# *** NOT A STRATEGY. NOT VALIDATED. NOT PROFITABLE. PAPER ONLY. ***
+# This exists to answer "why did config/scalp.yaml take no trades?". That config is the "ignition"
+# entry: it only fires when a coin is already up >= 12% today AND makes a fresh +6% hour on >= 4x
+# volume at a new 24h high — about 2 signals a DAY across the whole market, so hours with zero trades
+# are normal and correct. This file keeps the same ignition engine but removes every gate so it
+# trades as often as the engine allows — to watch fills, stops, trailing, fees, funding and the
+# dashboard update live. It will LOSE money (fees + stops dominate); the point is cadence, not edge.
+#
+# Fully opened vs config/scalp.yaml (tuned to trade as much as possible):
+#   min_change 0.12 -> 0.0     any scanned mover qualifies
+#   min_ret    0.06 -> 0.0     ANY push to a new short-window high is an entry (no size threshold)
+#   vol_mult   4.0  -> 0.0     no volume filter at all
+#   ret_n      12   -> 2       the "impulse" is just the last 10 minutes
+#   entry_history_bars 288->12 "new high/low" is over ~55 min -> breakouts constantly
+#   longs only -> longs + shorts        both directions
+#   skip_hours 18-23 -> none            around the clock
+#   max_per_day 1 -> 200, cooldown 180m -> 3m    same coin re-enters almost immediately
+#   time_stop 600m -> 20m               very short holds; slots free up fast -> more trades
+#   top_n 8 -> 20, min 24h vol 50M -> 20M        a much wider pool of active coins
+#   max_positions 3 -> 8                more trades open at once
+#   market entry kept                   immediate fill on the signal bar
+# Risk guards widened ON PURPOSE so it never halts and the account lasts for a long demo:
+#   daily_loss_limit 0.06 -> 0.9, max_trades_per_day 40 -> 1000, risk_per_trade 0.01 -> 0.0025.
+# It uses its own paper account so it never touches your other runs.
+#
+#   Quick offline check:   uv run autotr live --replay --config config/scalp_test.yaml --start 2026-11-05 --end 2026-11-06
+#   Live paper trading:    uv run autotr live  --config config/scalp_test.yaml --reset
+#   Dashboard:             uv run autotr web   --config config/scalp_test.yaml --port 8082
+universe:
+  source: movers            # backtests / replays: each day's top movers (autotr download-movers)
+  live_use_symbols: false   # live: scan the market, not a fixed coin list
+  live_candidates: 150      # live: warm the 150 highest-volume USDT perps, then rank by 24h change
+live:
+  db_path: data/live_scalptest.db   # its own paper account — safe to run next to config/scalp.yaml
+research: {windows: scalp}
+exchange: {taker_fee: 0.0005, maker_fee: 0.0002, slippage_bps: 5.0}
+scanner: {rank_by: change_24h, top_n: 20, min_quote_volume_24h: 20000000, rescan_minutes: 15}
+risk: {risk_per_trade: 0.0025, max_positions: 8, max_trades_per_day: 1000, daily_loss_limit: 0.9}
+strategy:
+  name: scalp_ignition
+  entry_tf_minutes: 5
+  structure_tf_minutes: 15
+  structure_history_bars: 96
+  entry_history_bars: 12      # tiny "new high/low" window -> constant breakouts
+  time_stop_minutes: 20       # very short holds so positions recycle fast
+  cooldown_minutes: 3
+  ladder_expiry_bars: 1
+  params: {ret_n: 2, min_ret: 0.0, vol_mult: 0.0, min_change: 0.0, min_bars: 10, r1: 0.5, r2: 1.0, stop_atr: 1.0, min_stop: 0.004, trail: 1.5, trail_after_r: 0.5, max_per_day: 200, longs: true, shorts: true, skip_hours: [], market: true}
