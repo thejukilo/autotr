@@ -33,6 +33,7 @@ class UniverseCfg(BaseModel):
     symbols: list[str] = []
     live_candidates: int = 40
     live_use_symbols: bool = False   # live: watch exactly `symbols` (the backtested list) instead of the top-N by volume
+    source: str = "list"             # backtest universe: list = `symbols` | movers = each day's top movers (autotr download-movers)
 
 
 class ScannerCfg(BaseModel):
@@ -109,6 +110,10 @@ class RiskCfg(BaseModel):
     max_trades_per_day: int = 40
 
 
+class ResearchCfg(BaseModel):
+    windows: str = "default"         # window set for `autotr research-eval`: default | scalp (see research.py)
+
+
 class LiveCfg(BaseModel):
     db_path: str = "data/live.db"
     candidate_refresh_hours: float = 6
@@ -129,6 +134,7 @@ class Config(BaseModel):
     strategy: StrategyCfg = StrategyCfg()
     risk: RiskCfg = RiskCfg()
     live: LiveCfg = LiveCfg()
+    research: ResearchCfg = ResearchCfg()
 
 
 def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:

@@ -11,6 +11,8 @@ from autotr.models import MINUTE_MS
 
 log = logging.getLogger(__name__)
 
+STALE_MS = 10 * MINUTE_MS
+
 
 @dataclass(slots=True)
 class ScanRow:
@@ -43,6 +45,8 @@ class Scanner:
             vol = st.volatility
             if vol is None or not st.ready:
                 continue
+            if st.last_1m is None or ts - st.last_1m.open_time > STALE_MS:
+                continue  # no recent data (backtest coin outside its downloaded days, or a dead stream)
             if volume_24h is not None:
                 qv = volume_24h.get(sym, 0.0)
                 chg = (change_24h or {}).get(sym, st.change_24h or 0.0)

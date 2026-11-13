@@ -55,6 +55,30 @@ def download(
     typer.echo(f"done: {stats}")
 
 
+@app.command("download-movers")
+def download_movers(
+    windows: str = typer.Option("scalp", help="Download for every window of this research window set"),
+    top_n: int = typer.Option(20, help="Coins per day, by |daily change|"),
+    min_volume: float = typer.Option(20_000_000, help="Minimum daily quote volume (USDT)"),
+    start: Optional[str] = typer.Option(None, help="Instead of --windows: first day YYYY-MM-DD"),
+    end: Optional[str] = typer.Option(None, help="Instead of --windows: last day YYYY-MM-DD"),
+) -> None:
+    """Download each day's top movers (incl. delisted coins) for `universe.source: movers` backtests."""
+    from autotr.data.movers import MoversStore
+    from autotr.research import WINDOW_SETS
+
+    _setup_logging(False)
+    cfg = load_config(None)
+    if start and end:
+        wins = [(_parse_date(start), _parse_date(end))]
+    else:
+        wins = [(w.start, w.end) for w in WINDOW_SETS[windows]]
+    typer.echo(f"Selecting the top {top_n} daily movers (>= ${min_volume / 1e6:.0f}M volume) for "
+               f"{', '.join(f'{a}..{b}' for a, b in wins)}")
+    stats = MoversStore(cfg.data.dir).download_windows(wins, top_n, min_volume)
+    typer.echo(f"done: {stats}")
+
+
 @app.command()
 def backtest(
     start: Optional[str] = typer.Option(None, help="First trading day YYYY-MM-DD"),
@@ -76,7 +100,7 @@ def backtest(
     cfg = load_config(config)
     end_d = _parse_date(end) if end else default_end_date()
     start_d = _parse_date(start) if start else end_d - timedelta(days=days - 1)
-    syms = _symbols(symbols, cfg.universe.symbols)
+    syms = _symbols(symbols, None) if symbols else None  # None = config universe (list or movers)
 
     res = run_backtest(cfg, start_d, end_d, syms)
     ex = res.core.exchange
@@ -174,7 +198,9 @@ def live(
 
             end_d = _parse_date(end) if end else default_end_date()
             start_d = _parse_date(start) if start else end_d - timedelta(days=2)
-            history = load_history(cfg, start_d, end_d, _symbols(symbols, cfg.universe.symbols))
+            from autotr.engine.backtest import backtest_symbols
+            history = load_history(cfg, start_d, end_d, _symbols(symbols, None) if symbols
+                                   else backtest_symbols(cfg, start_d, end_d))
             feed = ReplayFeed(history, speed)
             # fills are still persisted immediately; periodic snapshots once per simulated hour
             engine = LiveEngine(cfg, store, FilterBook.load(cfg.data.dir), bar_fills=True,
@@ -458,7 +484,7 @@ def research_eval(
     kinds = {"holdout"} if only_holdout else {"research", "validation"} | ({"holdout"} if holdout else set())
     out = out or Path("reports/research") / config.stem
     t0 = time.time()
-    results = evaluate_windows(cfg, select_windows(kinds), out, workers)
+    results = evaluate_windows(cfg, select_windows(kinds, cfg.research.windows), out, workers)
     save(out, config.stem, str(config), results)
     typer.echo(summary_table(f"{config.stem}  ({time.time() - t0:.0f}s)", results))
     typer.echo(f"Saved {out}/results.json, summary.txt, trades_R*.csv")

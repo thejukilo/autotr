@@ -18,6 +18,14 @@ log = logging.getLogger(__name__)
 EQUITY_SAMPLE_MS = 15 * MINUTE_MS
 
 
+def backtest_symbols(cfg: Config, start: date, end: date) -> list[str]:
+    """The configured coin list, or (universe.source = movers) every coin that was a top mover in the period."""
+    if cfg.universe.source == "movers":
+        from autotr.data.movers import movers_symbols
+        return movers_symbols(cfg.data.dir, start, end)
+    return cfg.universe.symbols
+
+
 @dataclass
 class BacktestResult:
     core: TradingCore
@@ -34,7 +42,9 @@ def run_backtest(cfg: Config, start: date, end: date, symbols: list[str] | None 
                  history: MarketHistory | None = None) -> BacktestResult:
     """Run over [start, end] (inclusive UTC days). Warm-up days before `start` (default: enough
     for the structure timeframe) feed indicators and the scanner without trading."""
-    h = history or load_history(cfg, start, end, symbols or cfg.universe.symbols, warmup_days)
+    if history is None and symbols is None:
+        symbols = backtest_symbols(cfg, start, end)
+    h = history or load_history(cfg, start, end, symbols, warmup_days)
     core = TradingCore(cfg, FilterBook.load(cfg.data.dir))
     ex = core.exchange
 

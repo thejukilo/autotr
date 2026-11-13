@@ -45,8 +45,22 @@ WINDOWS: list[Window] = [
 ]
 
 
-def select_windows(kinds: set[str]) -> list[Window]:
-    return [w for w in WINDOWS if w.kind in kinds]
+# Scalping search (Nov 2026, `research.windows: scalp`): 3-week windows on the top-movers universe.
+# Separate holdout from the momentum search; spread over different market regimes.
+SCALP_WINDOWS: list[Window] = [
+    Window("SR1", "research", date(2025, 9, 1), date(2025, 9, 21)),
+    Window("SR2", "research", date(2026, 2, 2), date(2026, 2, 22)),
+    Window("SV1", "validation", date(2025, 12, 1), date(2025, 12, 21)),
+    Window("SV2", "validation", date(2026, 5, 4), date(2026, 5, 24)),
+    Window("SH1", "holdout", date(2026, 8, 17), date(2026, 9, 6)),
+    Window("SH2", "holdout", date(2026, 10, 19), date(2026, 11, 8)),
+]
+
+WINDOW_SETS: dict[str, list[Window]] = {"default": WINDOWS, "scalp": SCALP_WINDOWS}
+
+
+def select_windows(kinds: set[str], window_set: str = "default") -> list[Window]:
+    return [w for w in WINDOW_SETS[window_set] if w.kind in kinds]
 
 
 def _hour(ts: int) -> int:
@@ -139,7 +153,7 @@ def evaluate_windows(cfg: Config, windows: list[Window], out_dir: Path, workers:
                          f"{r['return_pct']:+7.1f}%  {r['trades']:4d} trades  win {r['win_rate']:.0%}  "
                          f"PF {r['profit_factor']:.2f}  avg R {r['avg_r']:+.3f}")
     log_progress(f"{name}: DONE in {time.time() - t0:.0f}s")
-    order = {w.name: i for i, w in enumerate(WINDOWS)}
+    order = {w.name: i for i, w in enumerate(WINDOWS + SCALP_WINDOWS)}
     results.sort(key=lambda r: order[r["window"]])
     return results
 
