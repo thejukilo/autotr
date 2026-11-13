@@ -67,6 +67,22 @@ account in `data/live_momentum.db`, and acts only when a 4h candle closes (00, 0
 It needs about 13 days of 4h history, which it downloads at start-up, so it can trade from the first
 4h close. Expect about one trade a day, and losing weeks: judge it after a few months, not days.
 
+### Paper trading momentum on 5-minute bars (experimental)
+
+```bash
+uv run autotr live --config config/momentum_5m.yaml         # terminal 1: the bot
+uv run autotr web  --config config/momentum_5m.yaml         # terminal 2: dashboard on http://localhost:8080
+uv run autotr status --config config/momentum_5m.yaml       # or a quick summary in the terminal
+uv run autotr live --config config/momentum_5m.yaml --reset # start over with $100
+```
+
+The same strategy with every window in 5m bars: every 5 minutes it ranks the 34 coins by their
+3.5-hour (42-bar) return, goes long the top 2 and short the bottom 2, with a 3 ATR(5m) stop and
+trailing stop, a 5-hour time limit and a 30-minute cooldown per coin. It has its own paper account
+(`data/live_momentum_5m.db`), so it can run next to the 4h version (use `--port 8081` for a second
+dashboard). **This version was not validated by the research.** A 14-day backtest (Oct 28 – Nov 10
+2026) lost 32%: about 30 trades a day, and $34.56 of fees against $2.57 of gross profit.
+
 ### Web dashboard
 
 ```bash

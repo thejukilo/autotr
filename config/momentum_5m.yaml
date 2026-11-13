@@ -1,0 +1,28 @@
+# Cross-sectional momentum on 5-minute bars: the config/momentum.yaml strategy with every window
+# expressed in 5m bars instead of 4h bars (scaled 48x shorter).
+# Every 5 min: rank the 34 coins by their 42-bar (3.5 h) return; long the top 2, short the bottom 2;
+# 3 ATR(5m) stop + 3 ATR(5m) trailing stop, no target, 5 h time stop, 30 min cooldown per coin.
+# NOTE: not validated by the strategy research (which found short holding times lose to fees).
+# Backtest:            uv run autotr backtest --config config/momentum_5m.yaml
+# Live paper trading:  uv run autotr live --config config/momentum_5m.yaml
+# Web dashboard:       uv run autotr web --config config/momentum_5m.yaml
+universe:
+  live_use_symbols: true     # trade the same 34 coins as in the research, ranked against each other
+live:
+  db_path: data/live_momentum_5m.db   # separate paper account from the 4h momentum strategy
+scanner:
+  rank_by: volatility
+  top_n: 34
+  min_quote_volume_24h: 20000000
+risk:
+  risk_per_trade: 0.01
+  max_positions: 4
+  max_trades_per_day: 40
+strategy:
+  name: xs_momentum_trail
+  entry_tf_minutes: 5
+  structure_tf_minutes: 5
+  structure_history_bars: 80
+  time_stop_minutes: 300
+  cooldown_minutes: 30
+  params: {lookback: 42, k: 2, ema: 1, stop_atr: 3.0, trail_atr: 3.0}
