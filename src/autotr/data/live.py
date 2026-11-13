@@ -68,10 +68,11 @@ class BinanceFeed:
         sem = asyncio.Semaphore(5)
 
         sc = self.cfg.strategy
-        struct_ms = sc.structure_tf_minutes * MINUTE_MS
 
         async def fetch(sym: str) -> list[Bar]:
-            # structure-TF history, entry-TF history, then 1m bars of the current structure bar
+            # structure-TF history, entry-TF history, then ~25h of 1m bars. The day of 1m bars is
+            # what feeds change_24h (needs a full 24h of 1m history); without it every strategy that
+            # gates on change_24h (the scalp_* family) cannot trade until 24h after start-up.
             async with sem:
                 bars: list[Bar] = []
                 if sc.structure_tf_minutes > 1:
@@ -81,8 +82,7 @@ class BinanceFeed:
                     bars += await self.rest.klines(sym, 500, interval_minutes=sc.entry_tf_minutes)
                 if 5 not in (sc.structure_tf_minutes, sc.entry_tf_minutes):
                     bars += await self.rest.klines(sym, 100, interval_minutes=5)  # scanner volatility
-                start = now_ms() - now_ms() % struct_ms
-                ones = await self.rest.klines(sym, 1500, start_time=start if sc.entry_tf_minutes > 1 else None)
+                ones = await self.rest.klines(sym, 1500, interval_minutes=1)  # latest ~25h of 1m bars
                 return bars + ones
 
         new = [s for s in symbols if s not in self.last_open]
