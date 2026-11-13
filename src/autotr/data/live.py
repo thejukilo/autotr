@@ -141,6 +141,26 @@ class BinanceFeed:
         except Exception as exc:  # noqa: BLE001
             await queue.put(ConnectionError(f"{name} stream: {exc}"))
 
+    async def _quote_reader(self, url: str, queue: asyncio.Queue) -> None:
+        """Self-healing pump for the quote (bookTicker) stream. Binance's public endpoint drops
+        repeatedly under load; reconnect it in the background (gentle backoff, quiet logging) instead
+        of forwarding the failure, so a flaky quote stream never tears down the klines stream."""
+        backoff = 1.0
+        while True:
+            try:
+                async with websockets.connect(url, ping_interval=20, ping_timeout=20,
+                                              max_size=2**23, open_timeout=15) as ws:
+                    backoff = 1.0
+                    async for raw in ws:
+                        await queue.put(raw)
+                raise ConnectionError("public stream closed")
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:  # noqa: BLE001
+                log.debug("quote stream dropped (%s) — reconnecting in %.0fs", exc, backoff)
+                await asyncio.sleep(backoff)
+                backoff = min(backoff * 2, 30.0)
+
     # ------------------------------------------------------------ parsing
     def _parse(self, msg: dict) -> list[Event]:
         data = msg.get("data")
@@ -198,7 +218,10 @@ class BinanceFeed:
                 session_end = time.monotonic() + refresh_s
                 next_vol = time.monotonic() + vol_every_s
                 queue: asyncio.Queue = asyncio.Queue(maxsize=10_000)
-                readers = [asyncio.create_task(self._reader(n, u, queue)) for n, u in urls.items()]
+                # The market stream (klines) stays fatal: a drop triggers a full reconnect + backfill.
+                # The quote stream self-heals in the background, so its frequent drops never stop trading.
+                readers = [asyncio.create_task(self._reader("market", urls["market"], queue)),
+                           asyncio.create_task(self._quote_reader(urls["public"], queue))]
                 try:
                     last_kline = time.monotonic()
                     while time.monotonic() < session_end:
