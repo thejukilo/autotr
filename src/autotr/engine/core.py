@@ -64,6 +64,7 @@ class TradingCore:
                 sgn = pos.side.sign
                 if new is not None and sgn * (new - pos.stop) > 0 and sgn * (bar.close - new) > 0:
                     pos.stop = new
+                    pos.stop_trailed = True  # a hit now exits as "trailing_stop", not "stop_loss"
         if not entry_closed or bar.symbol not in self.scanner.active:
             return None
         sig = self.strategy.on_bar(st)

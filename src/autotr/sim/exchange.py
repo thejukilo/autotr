@@ -77,6 +77,7 @@ class Position:
     signal_ts: int = 0
     rungs: tuple[float, ...] = ()
     confidence: float = 1.0
+    stop_trailed: bool = False  # True once manage() has tightened the stop (for the exit label)
 
     @property
     def notional(self) -> float:
@@ -260,7 +261,8 @@ class PaperExchange:
                 self._liquidate(pos, bar.open_time)
                 return
             if s * (bar.open - pos.stop) <= 0:
-                self._close(pos, bar.open * (1 - s * slip), bar.open_time, "stop_loss (gap)", cfg.taker_fee)
+                reason = "trailing_stop (gap)" if pos.stop_trailed else "stop_loss (gap)"
+                self._close(pos, bar.open * (1 - s * slip), bar.open_time, reason, cfg.taker_fee)
                 return
             if s * (bar.open - pos.take_profit) >= 0:
                 self._close(pos, bar.open, bar.open_time, "take_profit (gap)", cfg.maker_fee)
@@ -296,7 +298,8 @@ class PaperExchange:
         # 4. stop first, then take-profit (not in a bar that just filled a limit rung)
         s = pos.side.sign
         if (bar.low if s > 0 else bar.high) * s <= pos.stop * s:
-            self._close(pos, pos.stop * (1 - s * slip), bar.close_time, "stop_loss", cfg.taker_fee)
+            reason = "trailing_stop" if pos.stop_trailed else "stop_loss"
+            self._close(pos, pos.stop * (1 - s * slip), bar.close_time, reason, cfg.taker_fee)
             return
         if not limit_filled and ((bar.high > pos.take_profit) if s > 0 else (bar.low < pos.take_profit)):
             self._close(pos, pos.take_profit, bar.close_time, "take_profit", cfg.maker_fee)
@@ -339,7 +342,8 @@ class PaperExchange:
         if s * (exit_px - pos.liq_price) <= 0:
             self._liquidate(pos, ts)
         elif s * (exit_px - pos.stop) <= 0:
-            self._close(pos, exit_px * (1 - s * slip), ts, "stop_loss", cfg.taker_fee)
+            reason = "trailing_stop" if pos.stop_trailed else "stop_loss"
+            self._close(pos, exit_px * (1 - s * slip), ts, reason, cfg.taker_fee)
         elif not limit_filled and s * (exit_px - pos.take_profit) >= 0:
             self._close(pos, pos.take_profit, ts, "take_profit", cfg.maker_fee)
         elif ts >= pos.time_stop_ts:

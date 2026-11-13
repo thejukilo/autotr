@@ -16,9 +16,9 @@
 #   entry_tf 5m -> 1m          decide every minute; trailing stop updated every minute
 #   ret_n 2 -> 10              impulse still measured over ~10 min
 #   entry_history_bars 12 -> 60   "new high/low" still over ~60 min
-#   r1 0.3->0.7, r2 1.5->3.0, stop_atr 1.0->2.0, trail 1.5->3.0   (ATR(1m) units; min_stop floors it)
+#   r1 0.3->0.7, r2 1.5->3.0, stop_atr 1.0->2.0   (ATR(1m) units; min_stop floors it)
 #   ladder_expiry_bars 3 -> 15    limit rungs still get ~15 min to fill
-#   time_stop 20m, cooldown 3m    unchanged (absolute minutes)
+#   cooldown 3m unchanged; time_stop raised to 60m so trail / take-profit exit first (see below)
 #
 #   Quick offline check:   uv run autotr live --replay --config config/scalp_test_1m.yaml --start 2026-11-05 --end 2026-11-06
 #   Live paper trading:    uv run autotr live  --config config/scalp_test_1m.yaml --reset
@@ -44,8 +44,14 @@ strategy:
   structure_tf_minutes: 15
   structure_history_bars: 96
   entry_history_bars: 60      # ~60 min "new high/low" window (in 1m bars)
-  time_stop_minutes: 20
+  time_stop_minutes: 60       # last-resort backstop only; trail / take-profit should exit first
   cooldown_minutes: 3
   ladder_expiry_bars: 15      # ~15 min for the limit rungs to fill (in 1m bars)
-  # 3-rung 20/30/50 ladder, offsets scaled for ATR(1m). Stop 2.0 ATR(1m) below the deepest rung.
-  params: {ret_n: 10, min_ret: 0.0, vol_mult: 0.0, min_change: 0.0, min_bars: 50, r1: 0.7, r2: 3.0, rungs: 3, weights: [0.2, 0.3, 0.5], stop_atr: 2.0, min_stop: 0.004, trail: 3.0, trail_after_r: 0.5, max_per_day: 400, longs: true, shorts: true, skip_hours: [], market: false}
+  # Exits (checked in real time on every bookTicker quote), in priority order:
+  #   take_profit 0.012  -> +1.2% from the signal price; shows as "take_profit"
+  #   stop: 1.0 ATR(1m) below the deepest rung, floored at 0.4% and CAPPED at 1.5% (max_stop) so the
+  #        reward:risk stays scalp-sized on volatile movers; shows as "stop_loss"
+  #   trail 1.0 ATR(1m), armed after +0.3R  -> rides winners, exits on the pullback; "trailing_stop"
+  #   time_stop 60m is the backstop if none of the above fire.
+  # 3-rung 20/30/50 ladder spread 0.3 -> 1.2 ATR(1m) below the signal (tight, fills on small dips).
+  params: {ret_n: 10, min_ret: 0.0, vol_mult: 0.0, min_change: 0.0, min_bars: 50, r1: 0.3, r2: 1.2, rungs: 3, weights: [0.2, 0.3, 0.5], stop_atr: 1.0, min_stop: 0.004, max_stop: 0.015, trail: 1.0, trail_after_r: 0.3, take_pct: 0.012, max_per_day: 400, longs: true, shorts: true, skip_hours: [], market: false}

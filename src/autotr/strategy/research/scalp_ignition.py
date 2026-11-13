@@ -27,7 +27,14 @@ DEFAULTS = dict(ret_n=12, min_ret=0.06, vol_mult=4.0, min_change=0.12, r1=0.5, r
                 # Conviction (0..1) for confidence-based sizing: averages three saturating gauges of
                 # the ignition's quality. conf_ret = the 1h return that counts as full-strength impulse;
                 # conf_vol = the volume multiple that counts as a full-strength surge.
-                conf_ret=0.03, conf_vol=10.0)
+                conf_ret=0.03, conf_vol=10.0,
+                # take_pct > 0 sets a fixed take-profit that far above the signal price (mirrored for
+                # shorts), e.g. 0.012 = +1.2%. 0 keeps the legacy "no target" (exit on trail / stop only).
+                take_pct=0.0,
+                # max_stop caps the stop distance from the average entry (0 = no cap). On volatile
+                # movers the ATR stop can blow out to many %, wrecking the reward:risk and stopping the
+                # trail from ever arming; capping it keeps the geometry scalp-sized.
+                max_stop=0.0)
 
 
 class Strategy:
@@ -88,10 +95,13 @@ class Strategy:
         stop = r2 - s * p["stop_atr"] * a
         if s * (avg - stop) / avg < p["min_stop"]:
             stop = avg * (1 - s * p["min_stop"])
+        if p["max_stop"] and s * (avg - stop) / avg > p["max_stop"]:
+            stop = avg * (1 - s * p["max_stop"])      # cap a blown-out ATR stop
         if stop <= 0:
             return None
         side = Side.LONG if s > 0 else Side.SHORT
-        sig = signal(st.symbol, side, ts, c, stop, far_target(s, c, stop),
+        tp = c * (1 + s * p["take_pct"]) if p["take_pct"] > 0 else far_target(s, c, stop)
+        sig = signal(st.symbol, side, ts, c, stop, tp,
                      f"ignition 1h={ret:+.0%} vol={hour_vol / base:.1f}x ch={ch:+.0%}")
         if sig is not None:
             if n > 1:
