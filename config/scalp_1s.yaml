@@ -1,0 +1,42 @@
+# PROTOTYPE: 1-SECOND scalping. PAPER ONLY. Run with `autotr fast1s -c config/scalp_1s.yaml`.
+#
+# *** NOT A STRATEGY. NOT VALIDATED. NOT PROFITABLE. A SPEED PROTOTYPE. ***
+# Decides every SECOND instead of every minute, using Binance's continuousKline_1s stream
+# (<pair>_perpetual@continuousKline_1s delivers a closed candle each second). The engine
+# (autotr/engine/fast1s.py) drives the same scalp_ignition strategy — confidence sizing, laddered
+# entries, take-profit, trailing stop — just fed 1-second candles. Fills/stops/target/trailing are
+# checked in real time on every bookTicker quote, exactly as in live mode.
+#
+# Two consequences of 1s data (vs the 1m engine):
+#   * 24h context (change_24h side-gate + mover ranking) comes from the REST 24h ticker, because a
+#     day of 1-second bars is 86,400 candles — too many to hold or backfill.
+#   * No warm-up (REST has no 1s history): each mover needs ~min_bars (45) SECONDS of streaming
+#     before it can trade, so expect ~1 minute of silence after it starts watching a new symbol.
+# Expect it to LOSE money — at 1s cadence fees dominate hard; the point is to watch the mechanics.
+#
+#   Live paper trading:  uv run autotr fast1s --config config/scalp_1s.yaml --reset
+#   Dashboard:           uv run autotr web    --config config/scalp_1s.yaml --port 8084
+universe:
+  source: movers
+  live_use_symbols: false
+  live_candidates: 100         # rank the 100 highest-volume USDT perps, then pick top movers
+live:
+  db_path: data/live_scalp1s.db   # its own paper account
+  snapshot_seconds: 2
+research: {windows: scalp}
+exchange: {taker_fee: 0.0005, maker_fee: 0.0002, slippage_bps: 5.0, leverage: 10}
+scanner: {rank_by: change_24h, top_n: 15, min_quote_volume_24h: 20000000, rescan_minutes: 5}
+risk: {risk_per_trade: 0.0025, max_positions: 8, max_trades_per_day: 5000, daily_loss_limit: 0.9,
+       confidence_sizing: true, conf_risk_min: 0.005, conf_risk_max: 0.02}
+strategy:
+  name: scalp_ignition
+  entry_tf_minutes: 1          # nominal: the 1s engine ignores this except for ladder-expiry math
+  structure_tf_minutes: 15     # unused by the 1s state (kept for config validity)
+  entry_history_bars: 60       # "new high/low" over the last 60 SECONDS
+  time_stop_minutes: 5         # short backstop; trail / take-profit should exit first
+  cooldown_minutes: 1          # min gap between trades on the same coin
+  ladder_expiry_bars: 1        # unfilled limit rungs cancel after ~1 min
+  # Exits (real time on every quote): take_profit +0.6% ("take_profit") / stop 1.0 ATR(1s) below the
+  # deepest rung, floored 0.3% and capped 1.0% ("stop_loss") / trail 1.0 ATR(1s) armed after +0.3R
+  # ("trailing_stop") / time_stop 5m backstop. Tight 3-rung ladder 0.3->1.2 ATR(1s) below the signal.
+  params: {ret_n: 10, min_ret: 0.0, vol_mult: 0.0, min_change: 0.0, min_bars: 45, r1: 0.3, r2: 1.2, rungs: 3, weights: [0.2, 0.3, 0.5], stop_atr: 1.0, min_stop: 0.003, max_stop: 0.01, trail: 1.0, trail_after_r: 0.3, take_pct: 0.006, atr_n: 14, max_per_day: 2000, longs: true, shorts: true, skip_hours: [], market: false}

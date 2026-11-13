@@ -241,6 +241,58 @@ def live(
         _print_status(db_path, cfg)
 
 
+@app.command()
+def fast1s(
+    db: Optional[Path] = typer.Option(None, help="SQLite file for the paper account"),
+    reset: bool = typer.Option(False, help="Start a fresh paper account (deletes the existing database)"),
+    config: Optional[Path] = ConfigOpt,
+    verbose: bool = typer.Option(False, "-v"),
+) -> None:
+    """PROTOTYPE: paper-trade on 1-SECOND candles (Binance continuousKline_1s) instead of 1m.
+
+    Live only (REST has no 1s history to replay). Drives the same scalp_ignition strategy at 1s
+    cadence; 24h context comes from the REST ticker. View it with `autotr web -c <config>`."""
+    import asyncio
+
+    import httpx
+
+    from autotr.data.rest import BinanceRest, save_exchange_info
+    from autotr.engine.fast1s import Fast1sEngine, Fast1sFeed
+    from autotr.report.tradelog import LiveStore
+    from autotr.sim.filters import FilterBook
+
+    _setup_logging(verbose)
+    cfg = load_config(config)
+    db_path = db or Path(cfg.live.db_path)
+    if reset and db_path.exists():
+        db_path.unlink()
+    store = LiveStore(db_path)
+
+    async def go() -> None:
+        rest = BinanceRest(cfg.live.rest_url)
+        try:
+            try:
+                save_exchange_info(await rest.exchange_info(), cfg.data.dir)
+            except httpx.HTTPError as exc:
+                typer.echo(f"Cannot reach the Binance futures API at {cfg.live.rest_url}:\n  {exc}", err=True)
+                raise typer.Exit(1)
+            engine = Fast1sEngine(cfg, store, FilterBook.load(cfg.data.dir))
+            if not engine.resumed:
+                typer.echo(f"New 1s paper account with ${cfg.account.starting_balance:.2f} -> {db_path}")
+            feed = Fast1sFeed(cfg, rest, must_watch=lambda: set(engine.ex.positions) | set(engine.ex.pending))
+            typer.echo("Prototype 1-second engine running (Ctrl+C to stop). Warming up ~1-2 min per mover…")
+            await engine.run(feed)
+        finally:
+            await rest.close()
+
+    try:
+        asyncio.run(go())
+    except KeyboardInterrupt:
+        typer.echo("\nstopped — account saved")
+    finally:
+        store.close()
+
+
 def _print_status(db_path: Path, cfg) -> None:
     from autotr.report.metrics import compute_metrics, format_summary
     from autotr.report.tradelog import LiveStore
