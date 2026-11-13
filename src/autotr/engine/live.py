@@ -51,6 +51,10 @@ class LiveEngine:
         self.last_seen: dict[str, int] = {}
         self._next_equity = 0
         self._next_status = 0
+        # Sub-minute persistence of open-position marks so the dashboard shows near-live P&L
+        # (live only; replay sets bar_fills=True and does not stream quotes).
+        self._snapshot_ms = int(cfg.live.snapshot_seconds * 1000)
+        self._last_snapshot = 0
         self.resumed = self._restore()  # may set last_minute / scanner state
 
         self.ex.on_trade.append(self._on_trade)
@@ -111,6 +115,11 @@ class LiveEngine:
                 self.ex.on_quote(ev.symbol, ev.bid, ev.ask, ev.ts)
             else:
                 self.ex.last_price[ev.symbol] = (ev.bid + ev.ask) / 2
+            # Persist fresh marks a few times a minute while holding, so the dashboard P&L is live.
+            if (self._snapshot_ms and not self.bar_fills and self.ex.positions
+                    and ev.ts - self._last_snapshot >= self._snapshot_ms):
+                self._last_snapshot = ev.ts
+                self.save()
         elif isinstance(ev, Funding):
             amount = self.ex.on_funding(ev.symbol, ev.rate, ev.mark_price, ev.ts)
             if amount:

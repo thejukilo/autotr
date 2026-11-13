@@ -189,7 +189,9 @@ def make_server(host: str, port: int, db_path: Path, cfg: Config, password: str)
                 return
             path = self.path.split("?", 1)[0]
             if path == "/":
-                self._send(200, PAGE.encode(), "text/html; charset=utf-8")
+                sec = cfg.live.ui_refresh_seconds
+                page = PAGE.replace("__REFRESH_MS__", str(int(sec * 1000))).replace("__REFRESH__", "%g" % sec)
+                self._send(200, page.encode(), "text/html; charset=utf-8")
             elif path == "/api/status":
                 try:
                     data = snapshot(db_path, cfg)
@@ -285,7 +287,7 @@ footer { color: var(--text-muted); font-size: 12px; margin-top: 20px; }
     <h2>Closed trades</h2>
     <div class="scroll" id="trades"></div>
   </section>
-  <footer>Paper trading only: simulated orders on real Binance prices, no real money. Refreshes every 30 s.</footer>
+  <footer>Paper trading only: simulated orders on real Binance prices, no real money. Refreshes every __REFRESH__ s.</footer>
 </main>
 <script>
 const $ = id => document.getElementById(id);
@@ -418,7 +420,7 @@ async function refresh() {
   }
 }
 refresh();
-setInterval(refresh, 30000);
+setInterval(refresh, __REFRESH_MS__);
 let rt; addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(() => last && render(last), 150); });
 </script>
 </body>
