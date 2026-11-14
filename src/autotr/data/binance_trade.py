@@ -48,7 +48,7 @@ def sign(secret: bytes, query: str) -> str:
 
 class BinanceTrade:
     def __init__(self, key: str | None, secret: str | None, *, testnet: bool = True,
-                 recv_window: int = 5000, timeout: float = 15.0,
+                 recv_window: int = 10000, timeout: float = 15.0,
                  transport: httpx.BaseTransport | None = None):
         if not key or not secret:
             raise RuntimeError(
@@ -62,8 +62,21 @@ class BinanceTrade:
         self.testnet = testnet
         self.base = TESTNET if testnet else MAINNET
         self.recv_window = recv_window
+        self._time_offset = 0   # serverTime - localTime, set by sync_time(); added to every timestamp
         self.client = httpx.Client(base_url=self.base, timeout=timeout,
                                    headers={"X-MBX-APIKEY": key}, transport=transport)
+
+    def sync_time(self) -> int:
+        """Align our request timestamps to Binance's server clock, so a drifting local clock can't
+        trigger -1021 ('timestamp ahead of server'). Best-effort; falls back to the local clock."""
+        try:
+            data = self._parse(self.client.get("/fapi/v1/time"))
+            self._time_offset = int(data["serverTime"]) - int(time.time() * 1000)
+            if abs(self._time_offset) > 500:
+                log.info("clock offset vs Binance: %+d ms (compensating)", self._time_offset)
+        except Exception:
+            log.warning("could not sync time with Binance; using local clock", exc_info=True)
+        return self._time_offset
 
     @classmethod
     def from_env(cls, *, testnet: bool = True, **kw) -> "BinanceTrade":
@@ -96,7 +109,7 @@ class BinanceTrade:
 
     def _signed(self, method: str, path: str, **params):
         params = {k: v for k, v in params.items() if v is not None}
-        params["timestamp"] = int(time.time() * 1000)
+        params["timestamp"] = int(time.time() * 1000) + self._time_offset
         params.setdefault("recvWindow", self.recv_window)
         return self._parse(self.client.request(method, path + "?" + self._sign_query(params)))
 

@@ -1,0 +1,41 @@
+# REAL-MONEY sibling of scalp_best.yaml — the SAME strategy (scalp_ignition, ~8 trades/day), with
+# safety rails set for live funds instead of a paper backtest. Run with:
+#     autotr live --real -c config/scalp_real.yaml
+# Keys come from the environment (BINANCE_API_KEY / BINANCE_API_SECRET); never put them here.
+#
+# Differences from config/scalp_best.yaml (everything else is identical, so the edge is unchanged):
+#   * risk.daily_loss_limit: 0.9 -> 0.15   — a REAL circuit breaker. The paper config halts only at a
+#       90% loss (effectively never); this stops trading for the UTC day after a 15% drawdown.
+#   * live.testnet: false                  — real Binance. Set true to rehearse on testnet first.
+#   * live.db_path: data/real.db           — its own account db, separate from the paper history.
+#   * live.max_notional_usd: 0             — off (risk-sizing governs). Set e.g. 150 for a hard cap.
+#
+# Still aggressive and worth knowing about (left as scalp_best so the strategy matches its backtest):
+#   * exchange.leverage: 10   — liquidation sits ~10% from entry (stops are capped at 1.5%, well inside).
+#   * risk.max_positions: 8   — many concurrent positions; on a $100 account margin limits this anyway.
+#   * confidence sizing 0.5%–2% risk/trade. Set risk.confidence_sizing: false for steadier, flat risk.
+# Lower leverage / max_positions here if you want a gentler trial; it will then differ from the backtest.
+universe:
+  source: movers
+  live_use_symbols: false
+  live_candidates: 150
+research: {windows: scalp}
+exchange: {taker_fee: 0.0005, maker_fee: 0.0002, slippage_bps: 5.0, leverage: 10}
+scanner: {rank_by: change_24h, top_n: 20, min_quote_volume_24h: 20000000, rescan_minutes: 15}
+risk: {risk_per_trade: 0.0025, max_positions: 8, max_trades_per_day: 1000, daily_loss_limit: 0.15,
+       confidence_sizing: true, conf_risk_min: 0.005, conf_risk_max: 0.02}
+strategy:
+  name: scalp_ignition
+  entry_tf_minutes: 5
+  structure_tf_minutes: 15
+  structure_history_bars: 96
+  entry_history_bars: 12
+  time_stop_minutes: 60
+  cooldown_minutes: 3
+  ladder_expiry_bars: 3
+  params: {ret_n: 2, min_ret: 0.03, vol_mult: 4.0, min_change: 0.08, min_bars: 10, r1: 0.3, r2: 1.5, rungs: 3, weights: [0.2, 0.3, 0.5], stop_atr: 1.0, min_stop: 0.004, max_stop: 0.015, trail: 2.0, trail_after_r: 1.0, take_pct: 0.02, max_per_day: 200, longs: true, shorts: true, skip_hours: [], market: false}
+live:
+  db_path: data/real.db
+  testnet: false
+  dry_run: false
+  max_notional_usd: 0

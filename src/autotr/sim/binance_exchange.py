@@ -60,6 +60,7 @@ class BinanceExchange(PaperExchange):
     def preflight(self) -> None:
         """Prove the keys work and the account is in the mode we require, and adopt the real balance.
         Raises on any pre-existing open position/orders so the bot never starts into an unknown book."""
+        self.client.sync_time()                    # align to Binance's clock before any signed call
         wallet, avail = self.client.wallet_usdt()
         self.balance = wallet
         log.info("live account: wallet $%.2f, available $%.2f (%s)", wallet, avail,

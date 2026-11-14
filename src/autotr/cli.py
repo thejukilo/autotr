@@ -175,6 +175,18 @@ def _confirm_real(testnet: bool, cfg, yes: bool) -> None:
                f"risk/trade={cfg.risk.risk_per_trade:.1%}  max_positions={cfg.risk.max_positions}")
     typer.echo(f"  daily-loss halt={cfg.risk.daily_loss_limit:.1%}  notional cap={cap}  "
                f"dry_run={cfg.live.dry_run}")
+    warn = []
+    if cfg.risk.daily_loss_limit > 0.30:
+        warn.append(f"daily-loss halt is {cfg.risk.daily_loss_limit:.0%} — it won't stop until the "
+                    f"account is down that much (near-zero protection)")
+    if cfg.exchange.leverage > 5:
+        warn.append(f"leverage is {cfg.exchange.leverage}x — liquidation is close to entry")
+    if cfg.risk.max_positions > 4:
+        warn.append(f"up to {cfg.risk.max_positions} positions open at once")
+    if warn and not testnet:
+        typer.echo("-" * 70)
+        for w in warn:
+            typer.echo(f"  WARNING: {w}")
     typer.echo("=" * 70)
     if testnet or cfg.live.dry_run or yes:
         return

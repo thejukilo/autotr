@@ -34,6 +34,9 @@ class FakeBinance:
 
     def handler(self, req: httpx.Request) -> httpx.Response:
         path, p = req.url.path, dict(req.url.params)
+        if path == "/fapi/v1/time":
+            import time as _t
+            return httpx.Response(200, json={"serverTime": int(_t.time() * 1000)})
         if path == "/fapi/v2/balance":
             return httpx.Response(200, json=[{"asset": "USDT", "balance": "100.0", "availableBalance": "100.0"}])
         if path in ("/fapi/v1/positionSide/dual", "/fapi/v1/marginType"):
