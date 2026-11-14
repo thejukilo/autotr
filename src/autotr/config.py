@@ -132,6 +132,11 @@ class LiveCfg(BaseModel):
     decision_seconds: float = 0.0     # dashboard: seconds between decisions (0 = derive from entry_tf_minutes)
     snapshot_seconds: float = 3.0     # live mode: how often open-position marks are persisted for the
                                       # dashboard while a position is open (0 = only the per-minute save)
+    # --- REAL-MONEY trading (autotr live --real). Keys come from the environment, never here.
+    testnet: bool = True              # real mode talks to testnet.binancefuture.com unless set false
+    dry_run: bool = False             # real mode: log the orders it WOULD place, send nothing
+    poll_seconds: float = 4.0         # how often the real exchange reconciles against Binance
+    max_notional_usd: float = 0.0     # extra safety cap on per-position notional (0 = off, use risk sizing)
 
 
 class Config(BaseModel):

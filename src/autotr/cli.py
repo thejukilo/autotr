@@ -164,6 +164,26 @@ def fetch_exchange_info(config: Optional[Path] = ConfigOpt) -> None:
     asyncio.run(go())
 
 
+def _confirm_real(testnet: bool, cfg, yes: bool) -> None:
+    """Print the live-trading banner and, for real mainnet money, require a typed confirmation."""
+    where = ("TESTNET (testnet.binancefuture.com) — no real money" if testnet
+             else "MAINNET — REAL MONEY ON THE LINE")
+    cap = "off (risk-sized)" if not cfg.live.max_notional_usd else f"${cfg.live.max_notional_usd:.0f}"
+    typer.echo("\n" + "=" * 70)
+    typer.echo(f"  LIVE TRADING — {where}")
+    typer.echo(f"  strategy={cfg.strategy.name}  leverage={cfg.exchange.leverage}x  "
+               f"risk/trade={cfg.risk.risk_per_trade:.1%}  max_positions={cfg.risk.max_positions}")
+    typer.echo(f"  daily-loss halt={cfg.risk.daily_loss_limit:.1%}  notional cap={cap}  "
+               f"dry_run={cfg.live.dry_run}")
+    typer.echo("=" * 70)
+    if testnet or cfg.live.dry_run or yes:
+        return
+    typer.echo("This places REAL orders with REAL money on your Binance USD-M futures account.")
+    if typer.prompt("Type LIVE to confirm, anything else to abort") != "LIVE":
+        typer.echo("aborted — no orders placed.")
+        raise typer.Exit(1)
+
+
 @app.command()
 def live(
     replay: bool = typer.Option(False, help="Replay cached history through the live engine instead of Binance"),
@@ -173,11 +193,15 @@ def live(
     symbols: Optional[str] = typer.Option(None, help="--replay: comma-separated symbols"),
     db: Optional[Path] = typer.Option(None, help="SQLite file for the paper account"),
     reset: bool = typer.Option(False, help="Start a fresh paper account (deletes the existing database)"),
+    real: bool = typer.Option(False, "--real", help="Place REAL orders on Binance (keys from env). "
+                              "Defaults to TESTNET unless live.testnet=false in the config."),
+    yes: bool = typer.Option(False, "--yes", help="Skip the real-money confirmation prompt (for mainnet)."),
     config: Optional[Path] = ConfigOpt,
     verbose: bool = typer.Option(False, "-v"),
 ) -> None:
-    """Run the paper-trading bot on live Binance data (or --replay history). Ctrl+C to stop;
-    the account is saved and resumes on the next start."""
+    """Run the trading bot on live Binance data (or --replay history). Paper by default; `--real`
+    places real orders using API keys from the environment. Ctrl+C to stop; the account is saved and
+    resumes on the next start."""
     import asyncio
 
     from autotr.engine.live import LiveEngine
@@ -186,6 +210,10 @@ def live(
 
     _setup_logging(verbose)
     cfg = load_config(config)
+    if real and replay:
+        typer.echo("--real cannot be combined with --replay (replay is historical, not a live account).",
+                   err=True)
+        raise typer.Exit(1)
     db_path = db or Path(cfg.live.db_path if not replay else Path(cfg.data.dir) / "replay.db")
     if (reset or replay) and db_path.exists():
         db_path.unlink()  # replays always start from a clean account
@@ -223,11 +251,34 @@ def live(
                            "Check your internet connection. Some networks (e.g. corporate) and countries "
                            "block Binance; the live bot must run where Binance futures is reachable.", err=True)
                 raise typer.Exit(1)
-            engine = LiveEngine(cfg, store, FilterBook.load(cfg.data.dir), bar_fills=False)
-            if not engine.resumed:
+            filters = FilterBook.load(cfg.data.dir)
+            exchange = trade_client = None
+            if real:
+                import time as _time
+
+                from autotr.data.binance_trade import BinanceTrade
+                from autotr.sim.binance_exchange import BinanceExchange
+
+                trade_client = BinanceTrade.from_env(testnet=cfg.live.testnet)
+                exchange = BinanceExchange(cfg, trade_client, filters)
+                _confirm_real(cfg.live.testnet, cfg, yes)
+            engine = LiveEngine(cfg, store, filters, bar_fills=False, exchange=exchange)
+            if real:
+                try:
+                    exchange.preflight()
+                    if engine.resumed:
+                        exchange.resync_after_resume(int(_time.time() * 1000))
+                except Exception as exc:  # noqa: BLE001 — surface any preflight failure and stop
+                    typer.echo(f"\nLive preflight failed, not trading: {exc}", err=True)
+                    raise typer.Exit(1)
+            elif not engine.resumed:
                 typer.echo(f"New paper account with ${cfg.account.starting_balance:.2f} -> {db_path}")
             feed = BinanceFeed(cfg, rest, must_watch=lambda: set(engine.ex.positions) | set(engine.ex.pending))
-            await engine.run(feed)
+            try:
+                await engine.run(feed)
+            finally:
+                if trade_client is not None:
+                    trade_client.close()
         finally:
             await rest.close()
 

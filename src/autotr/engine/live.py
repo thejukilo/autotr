@@ -37,13 +37,14 @@ def _hhmm(ts: int) -> str:
 
 class LiveEngine:
     def __init__(self, cfg: Config, store: LiveStore | None, filters: FilterBook | None = None,
-                 bar_fills: bool = False, save_every_ms: int = MINUTE_MS):
+                 bar_fills: bool = False, save_every_ms: int = MINUTE_MS,
+                 exchange: "PaperExchange | None" = None):
         self.cfg = cfg
         self.store = store
         self.bar_fills = bar_fills
         self.save_every_ms = save_every_ms
         self._next_save = 0
-        self.core = TradingCore(cfg, filters)
+        self.core = TradingCore(cfg, filters, exchange)
         self.ex = self.core.exchange
         self.volumes: dict[str, float] | None = None
         self.changes: dict[str, float] | None = None
