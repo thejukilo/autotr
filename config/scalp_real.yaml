@@ -11,6 +11,11 @@
 #       the backtested P&L; it only governs how far liquidation is and how much total margin the wallet
 #       can carry. At 2x the $100 wallet backs at most ~$200 of total notional across all positions —
 #       so fewer trades stack at once, which is the real cap you asked for.
+#   * risk.confidence_sizing: false + risk_per_trade 0.005  — flat 0.5% risk per trade, NOT the paper
+#       config's conviction-scaled 0.5%–2%. A full-year risk sweep showed confidence sizing was the main
+#       drawdown driver: it took big swings on "high-conviction" signals that didn't pay. Flat 0.5% cut
+#       max drawdown ~35% -> ~11% while keeping the trade count/win rate and raising return (+1.2% ->
+#       +5.9%, PF 1.03). Flat 0.25% halves drawdown again but skips ~1/3 of signals (size < min-notional).
 #   * live.testnet: false                  — real Binance. Set true to rehearse on testnet first.
 #   * live.db_path: data/real.db           — its own account db, separate from the paper history.
 #   * live.max_notional_usd: 0             — off (risk-sizing governs). Set e.g. 60 for a hard per-trade cap.
@@ -19,10 +24,11 @@
 # opens as they fill, at the real average — matching the backtest. (The old real path collapsed this to
 # one market order; fixed in sim/binance_exchange.py.)
 #
-# Stops are still scalp-tight (min 0.4%, max 1.5%) with a +2% take-profit — the geometry the backtest
-# validated. Widening the stop also means re-tuning the take-profit/trail (or reward:risk goes < 1), so
-# it is a strategy change to BACKTEST, not a number to guess on live funds. See notes below the params.
-# risk.confidence_sizing scales risk 0.5%–2% with signal conviction; set it false for flat 0.25% risk.
+# Stops are scalp-tight (min 0.4%, max 1.5%) with a +2% take-profit — the geometry the backtest validated.
+# A full sweep of WIDER stops (families A/B, up to 1.2-4.0%, with/without a fixed target) made it worse on
+# every axis (-26% to -72% over the year, 2x the drawdown), so the tight stop is kept. See notes below.
+# max_positions (8) does not bind — the strategy rarely holds >2 at once; lowering it changes nothing.
+# daily_loss_limit stays 0.15: combining a tighter breaker WITH flat sizing hurt (it clips recoveries).
 universe:
   source: movers
   live_use_symbols: false
@@ -30,8 +36,8 @@ universe:
 research: {windows: scalp}
 exchange: {taker_fee: 0.0005, maker_fee: 0.0002, slippage_bps: 5.0, leverage: 2}
 scanner: {rank_by: change_24h, top_n: 20, min_quote_volume_24h: 20000000, rescan_minutes: 15}
-risk: {risk_per_trade: 0.0025, max_positions: 8, max_trades_per_day: 1000, daily_loss_limit: 0.15,
-       confidence_sizing: true, conf_risk_min: 0.005, conf_risk_max: 0.02}
+risk: {risk_per_trade: 0.005, max_positions: 8, max_trades_per_day: 1000, daily_loss_limit: 0.15,
+       confidence_sizing: false, conf_risk_min: 0.005, conf_risk_max: 0.02}
 strategy:
   name: scalp_ignition
   entry_tf_minutes: 5
@@ -48,12 +54,11 @@ live:
   dry_run: false
   max_notional_usd: 0
 
-# --- Notes on "wider stops" ----------------------------------------------------------------------
-# The stop lives in params above: min_stop / max_stop (fraction from the average entry) and stop_atr.
-# To make stops "less close" you raise min_stop/max_stop — BUT take_pct (the +2% target) and the trail
-# are tuned to today's 0.4–1.5% stop. If you widen the stop past the target, reward:risk drops below 1
-# and the +1R trail never arms (the target fires first). So a wider-stop variant must move together:
-#   e.g. min_stop 0.008, max_stop 0.025, take_pct 0.035, trail_after_r 1.0  — and be re-backtested
-#   (autotr backtest -c <copy>.yaml) to confirm it still has an edge BEFORE risking funds.
-# Laddering already helps the "entry/exit touch instantly" problem on its own: the position only opens
-# on a pullback into the limit rungs (a better price), instead of chasing with a market order.
+# --- Why the stops are NOT wider (already tested) -------------------------------------------------
+# Wider stops feel safer but backtested worse here. Over the full cached year, every wider-stop variant
+# lost money: min/max 0.8-2.5% up to 1.2-4.0%, with a proportionally wider fixed take-profit (family A)
+# or no target so the trail runs (family B), returned -26% to -72% with ~2x the drawdown. This is a fast
+# take-the-+2% scalp, not a trend-rider: the ignition moves reverse, so a wider stop just bleeds on the
+# losers and the trail gives winners back. The tight stop + quick target IS the edge — leave it.
+# Laddering already addresses the "entry/exit touch instantly" feel: the position only opens on a
+# pullback into the limit rungs (a better price), instead of chasing with a market order.
